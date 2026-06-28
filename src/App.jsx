@@ -1,51 +1,82 @@
 import { useState, useEffect } from "react";
 
-// Storage adapter: syncs all state through one Make.com webhook (data-store record "shared").
-// Every logical key is held in a single JSON map; localStorage mirrors it for offline reads.
-// Override the endpoint with VITE_SYNC_URL at build time if the webhook ever changes.
+// ---- Config (all public values, baked at build; see DESIGN.md) ----
 const SYNC_URL = import.meta.env.VITE_SYNC_URL || "https://hook.eu1.make.com/9sj1gxhjebty57hamg2a9elteipdqbvb";
-const LS_MIRROR = "packing:v4:all";
+const APP_SECRET = import.meta.env.VITE_APP_SECRET || "pktool_s3cr3t_2f8a"; // webhook speed-bump (public, not real security)
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ""; // OAuth client id; empty disables sign-in
+const ADMIN_EMAILS = ["jonas.takolander@gmail.com"];
+const isAdminEmail = (e) => !!e && ADMIN_EMAILS.includes(e.toLowerCase());
+
+// ---- Auth helpers (Google Identity Services) ----
+const AUTH_LS = "packing:auth"; // cached identity { email, name, picture }
+function decodeJwt(t) { try { const p = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"); return JSON.parse(decodeURIComponent(escape(atob(p)))); } catch (e) { return null; } }
+function loadGis() {
+  return new Promise((resolve, reject) => {
+    if (window.google && window.google.accounts) return resolve();
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client"; s.async = true; s.defer = true;
+    s.onload = () => resolve(); s.onerror = () => reject(new Error("GIS load failed"));
+    document.head.appendChild(s);
+  });
+}
+function cachedIdentity() { try { const v = localStorage.getItem(AUTH_LS); return v ? JSON.parse(v) : null; } catch (e) { return null; } }
+function cacheIdentity(u) { try { if (u) localStorage.setItem(AUTH_LS, JSON.stringify(u)); else localStorage.removeItem(AUTH_LS); } catch (e) {} }
+
+// ---- Storage adapter: one record per user (user:<email>) on the Make webhook ----
+// A user's whole state is one JSON map; localStorage mirrors it per user for offline reads.
+// Pushes are gated on a successful remote load so a failed fetch never clobbers good data.
 const LEGACY_KEYS = ["packing:v4:tpl", "packing:v2:settings", "packing:v4:checked", "packing:v4:userdef"];
+let activeKey = null;      // e.g. "user:jane@x.com"
+let migrateShared = false; // admin's first login seeds from the legacy single-list record
+let cache = null, cacheReady = false, remoteOK = false, syncTimer = null;
 
-let cache = null;        // { [key]: valueString }
-let cacheReady = false;  // cache has been initialised (remote or local)
-let remoteOK = false;    // last remote load succeeded -> safe to push (never clobber on failure)
-let syncTimer = null;
-
-function readLocalMirror() {
-  try { const m = localStorage.getItem(LS_MIRROR); if (m) return JSON.parse(m); } catch (e) {}
-  const legacy = {}; // migrate from the pre-sync per-key layout if present
+const mirrorKey = () => "packing:v4:all:" + (activeKey || "anon");
+function readMirror() {
+  try { const m = localStorage.getItem(mirrorKey()); if (m) return JSON.parse(m); } catch (e) {}
+  const legacy = {}; // one-time pickup of the old per-key layout (single-user era)
   for (const k of LEGACY_KEYS) { try { const v = localStorage.getItem(k); if (v != null) legacy[k] = v; } catch (e) {} }
   return legacy;
 }
-function writeLocalMirror() { try { localStorage.setItem(LS_MIRROR, JSON.stringify(cache || {})); } catch (e) {} }
+function writeMirror() { try { localStorage.setItem(mirrorKey(), JSON.stringify(cache || {})); } catch (e) {} }
 
-async function ensureLoaded() {
-  if (cacheReady) return cache;
-  cache = readLocalMirror(); // instant/offline seed
+async function remoteGet(key) {
+  const res = await fetch(SYNC_URL + "?api=get&secret=" + encodeURIComponent(APP_SECRET) + "&key=" + encodeURIComponent(key));
+  if (!res.ok) throw new Error("http " + res.status);
+  const txt = await res.text();
+  let obj = null; try { obj = txt ? JSON.parse(txt) : {}; } catch (e) { obj = {}; } // "Accepted"/missing -> {}
+  return obj && typeof obj === "object" ? obj : {};
+}
+
+// Initialise the adapter for a signed-in user; resolves once the cache is ready.
+async function initUser(email, isAdmin) {
+  activeKey = "user:" + String(email).toLowerCase();
+  migrateShared = !!isAdmin;
+  cache = readMirror(); cacheReady = false; remoteOK = false;
+  if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
   if (SYNC_URL) {
     try {
-      const res = await fetch(SYNC_URL + "?api=get");
-      if (res.ok) {
-        const txt = await res.text();
-        let remote = null; try { remote = txt ? JSON.parse(txt) : {}; } catch (e) { remote = {}; } // "Accepted"/empty -> {}
-        if (remote && typeof remote === "object") {
-          if (Object.keys(remote).length > 0) cache = remote; // remote wins when it has data; else keep local for migration
-          remoteOK = true;
-          writeLocalMirror();
-        }
+      let remote = await remoteGet(activeKey);
+      if (Object.keys(remote).length === 0 && migrateShared) {
+        try { const legacy = await remoteGet("shared"); if (Object.keys(legacy).length > 0) remote = legacy; } catch (e) {}
       }
-    } catch (e) { /* offline: keep local mirror, stay read-only to remote */ }
+      if (Object.keys(remote).length > 0) cache = remote; // else keep local seed / app defaults
+      remoteOK = true; writeMirror();
+    } catch (e) { /* offline: keep local mirror, read-only to remote */ }
   }
   cacheReady = true;
   return cache;
 }
+function teardownUser() {
+  if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
+  if (remoteOK) pushNow(); // flush pending writes before leaving
+  activeKey = null; cache = null; cacheReady = false; remoteOK = false; migrateShared = false;
+}
 
 function pushNow() {
   syncTimer = null;
-  if (!SYNC_URL || !remoteOK) return;
+  if (!SYNC_URL || !remoteOK || !activeKey) return;
   try {
-    fetch(SYNC_URL + "?api=set", {
+    fetch(SYNC_URL + "?api=set&secret=" + encodeURIComponent(APP_SECRET) + "&key=" + encodeURIComponent(activeKey), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" }, // CORS-simple: no preflight
       body: "value=" + encodeURIComponent(JSON.stringify(cache || {})),
@@ -54,14 +85,14 @@ function pushNow() {
   } catch (e) {}
 }
 function scheduleSync() {
-  if (!SYNC_URL || !remoteOK) return; // only push once we know remote is reachable
+  if (!SYNC_URL || !remoteOK || !activeKey) return; // only push once remote is reachable
   if (syncTimer) clearTimeout(syncTimer);
   syncTimer = setTimeout(pushNow, 600);
 }
 
 const store = {
-  async get(k) { const all = await ensureLoaded(); const v = all ? all[k] : null; return v == null ? null : { value: v }; },
-  set(k, v) { if (!cache) cache = {}; cache[k] = v; cacheReady = true; writeLocalMirror(); scheduleSync(); },
+  async get(k) { if (!cacheReady) return null; const v = cache ? cache[k] : null; return v == null ? null : { value: v }; },
+  set(k, v) { if (!activeKey) return; if (!cache) cache = {}; cache[k] = v; cacheReady = true; writeMirror(); scheduleSync(); },
 };
 
 const C = { paper:"#f4f3ee", ink:"#15211b", fairway:"#1f6f47", fairwayDk:"#155034", line:"#e2e1d8", muted:"#6c726a", card:"#ffffff", sand:"#c9a24b", danger:"#b23b3b" };
@@ -179,7 +210,7 @@ function ItemEditor({ sid, item, nights, R, trip, updItem, updQty, delItem, clos
   );
 }
 
-export default function App() {
+function PackingApp({ user, isAdmin, onSignOut }) {
   const [tpl, setTpl] = useState(makeDefaults);
   const [trip, setTrip] = useState("golf");
   const [nights, setNights] = useState(3);
@@ -229,6 +260,13 @@ export default function App() {
   return (
     <div style={{ minHeight:"100vh", background:C.paper, color:C.ink, fontFamily:"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
       <div style={{ maxWidth:560, margin:"0 auto", padding:"20px 16px 72px" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10, fontSize:12.5, color:C.muted }}>
+          <span style={{ display:"flex", alignItems:"center", gap:7, minWidth:0 }}>
+            {user && user.picture && <img src={user.picture} alt="" width={20} height={20} style={{ borderRadius:"50%" }} referrerPolicy="no-referrer" />}
+            <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{(user && (user.name || user.email)) || ""}{isAdmin ? " · admin" : ""}</span>
+          </span>
+          <button onClick={onSignOut} style={linkBtn(C.muted)}>Sign out</button>
+        </div>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
           <h1 style={{ fontSize:24, fontWeight:800, letterSpacing:-0.5, margin:0 }}>Pack</h1>
           <button onClick={() => { setMode(mode==="pack"?"edit":"pack"); setExpanded(null); }} style={{ height:36, padding:"0 16px", borderRadius:10, border:"1px solid "+(mode==="edit"?C.fairway:C.line), background: mode==="edit"?C.fairway:C.card, color: mode==="edit"?"#fff":C.ink, fontWeight:700, fontSize:14, cursor:"pointer" }}>{mode==="pack"?"Edit":"Done"}</button>
@@ -321,4 +359,70 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+function LoginScreen({ error }) {
+  return (
+    <div style={{ minHeight:"100vh", background:C.paper, color:C.ink, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
+      <div style={{ width:"100%", maxWidth:360, padding:"24px 20px", textAlign:"center" }}>
+        <div style={{ fontSize:42, marginBottom:6 }}>{"🧳"}</div>
+        <h1 style={{ fontSize:26, fontWeight:800, letterSpacing:-0.5, margin:"0 0 6px" }}>Packing</h1>
+        <p style={{ fontSize:14, color:C.muted, lineHeight:1.5, margin:"0 0 22px" }}>Sign in to plan trips and sync your lists across every device.</p>
+        <div id="gbtn" style={{ display:"flex", justifyContent:"center", minHeight:44 }} />
+        {error && <p style={{ fontSize:12.5, color:C.danger, marginTop:16, lineHeight:1.4 }}>{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+function Splash({ text }) {
+  return <div style={{ minHeight:"100vh", background:C.paper, color:C.muted, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"ui-sans-serif, system-ui, sans-serif", fontSize:14 }}>{text}</div>;
+}
+
+export default function App() {
+  const [user, setUser] = useState(cachedIdentity);
+  const [ready, setReady] = useState(false);
+  const [authMsg, setAuthMsg] = useState("");
+
+  // Load the signed-in user's data before showing the app.
+  useEffect(() => {
+    if (!user) { setReady(false); return; }
+    let alive = true;
+    (async () => { await initUser(user.email, isAdminEmail(user.email)); if (alive) setReady(true); })();
+    return () => { alive = false; };
+  }, [user]);
+
+  // Wire up Google sign-in while logged out.
+  useEffect(() => {
+    if (user) return;
+    let cancelled = false;
+    (async () => {
+      if (!GOOGLE_CLIENT_ID) { setAuthMsg("Sign-in isn't configured yet — add a Google client ID (VITE_GOOGLE_CLIENT_ID)."); return; }
+      try {
+        await loadGis();
+        if (cancelled || !(window.google && window.google.accounts)) return;
+        window.google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: (resp) => {
+            const c = decodeJwt(resp.credential);
+            if (c && c.email) { const u = { email: c.email, name: c.name, picture: c.picture }; cacheIdentity(u); setUser(u); }
+          },
+        });
+        const el = document.getElementById("gbtn");
+        if (el) window.google.accounts.id.renderButton(el, { theme: "filled_blue", size: "large", text: "signin_with", shape: "pill" });
+        window.google.accounts.id.prompt();
+      } catch (e) { setAuthMsg("Couldn't load Google sign-in. Check your connection and try again."); }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  const signOut = () => {
+    teardownUser(); cacheIdentity(null);
+    try { if (window.google && window.google.accounts) window.google.accounts.id.disableAutoSelect(); } catch (e) {}
+    setUser(null); setReady(false);
+  };
+
+  if (!user) return <LoginScreen error={authMsg} />;
+  if (!ready) return <Splash text={"Loading your lists…"} />;
+  return <PackingApp user={user} isAdmin={isAdminEmail(user.email)} onSignOut={signOut} />;
 }
