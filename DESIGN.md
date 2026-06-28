@@ -1,6 +1,6 @@
 # Packing Tool — multi-user design
 
-Status: **Phase 1 in progress** (2026-06-28). Supersedes the single-shared-list model.
+Status: **Phases 1–2 shipped** (2026-06-29). Phase 3 (admin panel + invite management) next. Supersedes the single-shared-list model.
 
 ## Goal
 Evolve the personal single-list app into an **invite-only multi-user** app:
@@ -50,8 +50,8 @@ Today the scenario hardcodes key `shared`. Changes:
 - Non-admins: normal trip planning; their personal default evolves independently of the global default.
 
 ## Phases
-1. **Accounts + per-user data** (in progress): Google login, per-user key, generalized Make scenario, migrate the current `shared` data into the signed-in admin's record.
-2. **Multiple trips:** trips list, new-trip (dates/type/details), per-trip inventory + state, trip switching.
+1. ✅ **Accounts + per-user data**: Google login, per-user key, generalized Make scenario, migrate the `shared` data into the signed-in admin's record.
+2. ✅ **Multiple trips:** trips home, new-trip (dates→nights, type/details), per-trip inventory + state, trip switching, per-user default editor + save-as-default. State stored under the `v5` key; Phase-1 records auto-migrate to a first "My trip".
 3. **Defaults + admin:** per-user evolving default; admin panel for `app:defaults` (template + rule config).
 4. **Optional:** magic-link login, Google-token verification in Make (real isolation) or Supabase migration, data-store sharding if the 1 MB store fills.
 

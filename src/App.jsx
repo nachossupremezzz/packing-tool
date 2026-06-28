@@ -111,7 +111,7 @@ function compute(qty, N, R) {
   const v = qty.n * N + qty.r * R + qty.c;
   return Math.max(qty.floor == null ? 0 : qty.floor, Math.round(v));
 }
-function labelFor(item, N, R) { const v = compute(item.qty, N, R); return v == null ? item.name : item.name + " \u00d7" + v; }
+function labelFor(item, N, R) { const v = compute(item.qty, N, R); return v == null ? item.name : item.name + " ×" + v; }
 function itemVisible(item, trip, beach, mode) {
   const s = item.scope || "all";
   if (s === "all") return true;
@@ -123,24 +123,24 @@ function itemVisible(item, trip, beach, mode) {
 
 function makeDefaults() {
   return { sections: [
-    { id:"docs", title:"Documents & money", items:[ none("d1","Passport / ID"), none("d2","Boarding passes (phone + backup)"), none("d3","Wallet \u2014 cards + cash"), none("d4","EHIC / Kela card") ] },
-    { id:"tech", title:"Tech", note:"Power bank (and rangefinder) ride in the cabin bag \u2014 never checked.", items:[ none("t1","Phone + charger"), none("t2","Power bank"), none("t3","Charging cables"), none("t4","Earbuds / headphones"), none("t5","Rangefinder / GPS watch + charger","golf") ] },
-    { id:"toil", title:"Toiletries", note:"\u2264100ml each, 1L clear bag, cabin.", items:[ none("o1","Toiletry bag"), none("o2","Shaver + charger"), none("o3","Toothbrush + toothpaste"), none("o4","Deodorant"), none("o5","Sunscreen"), none("o6","Lip balm"), none("o7","Painkillers / meds") ] },
+    { id:"docs", title:"Documents & money", items:[ none("d1","Passport / ID"), none("d2","Boarding passes (phone + backup)"), none("d3","Wallet — cards + cash"), none("d4","EHIC / Kela card") ] },
+    { id:"tech", title:"Tech", note:"Power bank (and rangefinder) ride in the cabin bag — never checked.", items:[ none("t1","Phone + charger"), none("t2","Power bank"), none("t3","Charging cables"), none("t4","Earbuds / headphones"), none("t5","Rangefinder / GPS watch + charger","golf") ] },
+    { id:"toil", title:"Toiletries", note:"≤100ml each, 1L clear bag, cabin.", items:[ none("o1","Toiletry bag"), none("o2","Shaver + charger"), none("o3","Toothbrush + toothpaste"), none("o4","Deodorant"), none("o5","Sunscreen"), none("o6","Lip balm"), none("o7","Painkillers / meds") ] },
     { id:"cloth", title:"Clothing", items:[
       fml("c1","Underwear (everyday)","all",1,0,2,1), fml("c2","Socks (everyday)","all",2,0,1,1), fix("c3","Long socks","all",1),
       fml("c4","T-shirts","all",1,0,1,1), fix("c5","Smart evening shirt","all",2), fix("c6","Casual shorts","all",2),
       fix("c7","Jeans","all",1), fix("c8","Hoodie / light layer","all",1), none("c9","Belt"), none("c10","Sunglasses"),
       none("c11","Casual shoes","all","wear on travel day") ] },
     { id:"golf", title:"Golf gear", note:"Clubs, shoes, rain gear & towels pack inside the travel cover (checked).", items:[
-      none("k1","Clubs in cart bag \u2192 travel cover","golf"), none("k2","Golf shoes","golf"),
+      none("k1","Clubs in cart bag → travel cover","golf"), none("k2","Golf shoes","golf"),
       fml("k3","Golf polos","golf",0,1,1,1), fml("k4","Golf shorts","golf",0,0.5,0,1),
       fml("ku","Golf underwear","golf",0,1,1,1,"fresh pair after each round"), fml("ks","Golf socks","golf",0,1,1,1),
-      none("k5","Caps \u2014 golf + casual","golf"), fix("k6","Balls","golf",12), none("k7","Tees","golf"),
+      none("k5","Caps — golf + casual","golf"), fix("k6","Balls","golf",12), none("k7","Tees","golf"),
       fix("k8","Gloves","golf",2), fix("k9","Wet-weather glove","golf",1), none("k10","Ball markers / pitch tool","golf"),
       fml("k11","Towels","golf",0,1,-1,1), none("k13","Rain jacket","golf"), none("k14","Rain hood","golf"),
       none("k15","Umbrella","golf"), none("k16","Blister plasters","golf"), none("k17","Water bottle","golf"), none("k18","Snacks","golf") ] },
     { id:"beach", title:"Sun / beach", items:[ fix("b1","Swimwear","beach",2), none("b2","Quick-dry / beach towel","beach"), none("b3","Flip-flops","beach"), none("b4","Sun hat","beach"), none("b5","After-sun","beach") ] },
-    { id:"pre", title:"Pre-flight", items:[ none("p1","Liquids \u2264100ml in 1L bag"), none("p2","Power bank in cabin bag"), none("p3","Carry-on size/weight checked"), none("p4","Golf cover booked with airline as sports item","golf"), none("p5","Loaded cover under weight limit (~20kg)","golf") ] },
+    { id:"pre", title:"Pre-flight", items:[ none("p1","Liquids ≤100ml in 1L bag"), none("p2","Power bank in cabin bag"), none("p3","Carry-on size/weight checked"), none("p4","Golf cover booked with airline as sports item","golf"), none("p5","Loaded cover under weight limit (~20kg)","golf") ] },
   ] };
 }
 
@@ -155,7 +155,7 @@ const pill = (on) => ({ flex:1, height:34, borderRadius:9, border:"1px solid "+(
 function Stepper({ value, set, step=1, min=0, max=99 }) {
   return (
     <div style={{ display:"flex", alignItems:"center", border:"1px solid "+C.line, borderRadius:10, background:C.card }}>
-      <button onClick={() => set(Math.max(min, +(value - step).toFixed(2)))} style={btnStep}>{"\u2212"}</button>
+      <button onClick={() => set(Math.max(min, +(value - step).toFixed(2)))} style={btnStep}>{"−"}</button>
       <div style={{ flex:1, textAlign:"center", fontSize:16, fontWeight:700 }}>{value}</div>
       <button onClick={() => set(Math.min(max, +(value + step).toFixed(2)))} style={btnStep}>+</button>
     </div>
@@ -198,13 +198,13 @@ function ItemEditor({ sid, item, nights, R, trip, updItem, updQty, delItem, clos
       {modeOf === "rule" && (
         <div>
           <div style={{ display:"flex", gap:8 }}>
-            <Field label={"\u00d7 nights"}><Stepper value={q.n} set={(v) => setF({ n: v })} step={1} min={0} max={9} /></Field>
-            <Field label={"\u00d7 rounds"}><Stepper value={q.r} set={(v) => setF({ r: v })} step={0.5} min={0} max={9} /></Field>
+            <Field label={"× nights"}><Stepper value={q.n} set={(v) => setF({ n: v })} step={1} min={0} max={9} /></Field>
+            <Field label={"× rounds"}><Stepper value={q.r} set={(v) => setF({ r: v })} step={0.5} min={0} max={9} /></Field>
             <Field label="+ flat"><Stepper value={q.c} set={(v) => setF({ c: v })} step={1} min={-9} max={20} /></Field>
             <Field label="min"><Stepper value={q.floor} set={(v) => setF({ floor: v })} step={1} min={0} max={20} /></Field>
           </div>
           <div style={{ marginTop:8, fontSize:12.5, color:C.fairwayDk, background:"#eef5f0", borderRadius:8, padding:"7px 10px" }}>
-            {q.n}{"\u00d7nights"} + {q.r}{"\u00d7rounds"} + {q.c}  {"\u2192"}  <b>{preview}</b> {trip === "golf" ? "(this trip)" : "(vacation, rounds=0)"}
+            {q.n}{"×nights"} + {q.r}{"×rounds"} + {q.c}  {"→"}  <b>{preview}</b> {trip === "golf" ? "(this trip)" : "(vacation, rounds=0)"}
           </div>
         </div>
       )}
@@ -213,32 +213,35 @@ function ItemEditor({ sid, item, nights, R, trip, updItem, updQty, delItem, clos
   );
 }
 
-function PackingApp({ user, isAdmin, onSignOut }) {
-  const [tpl, setTpl] = useState(makeDefaults);
-  const [trip, setTrip] = useState("golf");
-  const [nights, setNights] = useState(3);
-  const [rounds, setRounds] = useState(4);
-  const [beach, setBeach] = useState(false);
-  const [mode, setMode] = useState("pack");
-  const [checked, setChecked] = useState({});
-  const [expanded, setExpanded] = useState(null);
-  const [userDef, setUserDef] = useState(null);
-  const [savedFlash, setSavedFlash] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+// ---- Trip helpers ----
+function nightsFromDates(s, e) { if (!s || !e) return null; const ms = new Date(e) - new Date(s); if (isNaN(ms) || ms < 0) return null; return Math.round(ms / 86400000); }
+function fmtDate(d) { if (!d) return ""; try { return new Date(d).toLocaleDateString(undefined, { day:"numeric", month:"short" }); } catch (e) { return d; } }
+const tripIcon = (type) => (type === "vacation" ? "🏖️" : "⛳");
+function tripProgress(trip) {
+  const secs = (trip.inventory && trip.inventory.sections) || [];
+  const ids = secs.flatMap((s) => s.items.filter((i) => itemVisible(i, trip.type, trip.beach, "pack")).map((i) => i.id));
+  return { packed: ids.filter((id) => (trip.checked || {})[id]).length, total: ids.length };
+}
 
-  useEffect(() => { (async () => {
-    try { const t = await store.get("packing:v4:tpl"); if (t && t.value) setTpl(JSON.parse(t.value)); } catch (e) {}
-    try { const s = await store.get("packing:v2:settings"); if (s && s.value) { const v = JSON.parse(s.value); if (v.trip) setTrip(v.trip); if (typeof v.nights==="number") setNights(v.nights); if (typeof v.rounds==="number") setRounds(v.rounds); if (typeof v.beach==="boolean") setBeach(v.beach); } } catch (e) {}
-    try { const c = await store.get("packing:v4:checked"); if (c && c.value) setChecked(JSON.parse(c.value)); } catch (e) {}
-    try { const u = await store.get("packing:v4:userdef"); if (u && u.value) setUserDef(JSON.parse(u.value)); } catch (e) {}
-    setLoaded(true);
-  })(); }, []);
+// First-run migration of the single-list (Phase 1) layout into the multi-trip (v5) shape.
+async function migrateToV5() {
+  const getJson = async (k) => { try { const r = await store.get(k); return r && r.value ? JSON.parse(r.value) : null; } catch (e) { return null; } };
+  const tpl = await getJson("packing:v4:tpl");
+  const settings = await getJson("packing:v2:settings");
+  const checked = await getJson("packing:v4:checked");
+  const userdef = await getJson("packing:v4:userdef");
+  const profileDefault = userdef || tpl || makeDefaults();
+  const trips = [];
+  if (tpl) {
+    trips.push({ id: uid("t"), name: "My trip", type: (settings && settings.trip) || "golf",
+      startDate: "", endDate: "", nights: (settings && settings.nights) || 3, rounds: (settings && settings.rounds) || 4,
+      beach: !!(settings && settings.beach), notes: "", inventory: tpl, checked: checked || {}, createdAt: 0 });
+  }
+  return { v: 5, profileDefault, trips };
+}
 
-  useEffect(() => { if (loaded) store.set("packing:v4:tpl", JSON.stringify(tpl)); }, [tpl, loaded]);
-  useEffect(() => { if (loaded) store.set("packing:v2:settings", JSON.stringify({ trip, nights, rounds, beach })); }, [trip, nights, rounds, beach, loaded]);
-  useEffect(() => { if (loaded) store.set("packing:v4:checked", JSON.stringify(checked)); }, [checked, loaded]);
-  useEffect(() => { if (loaded && userDef) store.set("packing:v4:userdef", JSON.stringify(userDef)); }, [userDef, loaded]);
-
+// ---- Reusable section/item list (pack + edit), operating on one template ----
+function PackList({ tpl, setTpl, mode, trip, nights, rounds, beach, checked, setChecked, expanded, setExpanded }) {
   const R = trip === "golf" ? rounds : 0;
   const mutate = (fn) => setTpl((prev) => { const next = JSON.parse(JSON.stringify(prev)); fn(next); return next; });
   const findSec = (t, sid) => t.sections.find((s) => s.id === sid);
@@ -249,119 +252,271 @@ function PackingApp({ user, isAdmin, onSignOut }) {
   const updSec = (sid, patch) => mutate((t) => Object.assign(findSec(t, sid), patch));
   const delSec = (sid) => mutate((t) => { t.sections = t.sections.filter((s) => s.id !== sid); });
   const addSec = () => mutate((t) => t.sections.push({ id: uid("s"), title:"New section", items: [] }));
-  const resetTpl = () => setTpl(JSON.parse(JSON.stringify(userDef || makeDefaults())));
-  const factoryReset = () => setTpl(makeDefaults());
-  const saveDefault = () => { setUserDef(JSON.parse(JSON.stringify(tpl))); setSavedFlash(true); setTimeout(() => setSavedFlash(false), 1600); };
-
-  const sectionsView = tpl.sections.map((s) => ({ ...s, vis: s.items.filter((i) => itemVisible(i, trip, beach, mode)) })).filter((s) => s.vis.length > 0);
-  const allIds = sectionsView.flatMap((s) => s.vis.map((i) => i.id));
-  const packed = allIds.filter((id) => checked[id]).length;
-  const total = allIds.length;
-  const pct = total ? Math.round((packed / total) * 100) : 0;
   const toggle = (id) => setChecked((c) => ({ ...c, [id]: !c[id] }));
 
+  const sectionsView = tpl.sections.map((s) => ({ ...s, vis: s.items.filter((i) => itemVisible(i, trip, beach, mode)) })).filter((s) => s.vis.length > 0);
+
+  return (
+    <>
+      {sectionsView.map((sec) => (
+        <div key={sec.id} style={{ marginBottom:20 }}>
+          {mode === "edit" ? (
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+              <input value={sec.title} onChange={(e) => updSec(sec.id, { title: e.target.value })} style={{ flex:1, fontSize:13, fontWeight:700, color:C.fairwayDk, textTransform:"uppercase", letterSpacing:1, border:"none", borderBottom:"1px solid "+C.line, background:"transparent", padding:"4px 0", outline:"none" }} />
+              <button onClick={() => delSec(sec.id)} style={{ border:"none", background:"transparent", color:C.danger, fontSize:18, cursor:"pointer", lineHeight:1 }}>{"✕"}</button>
+            </div>
+          ) : (
+            <div style={{ fontSize:12, letterSpacing:1.5, textTransform:"uppercase", color:C.fairwayDk, fontWeight:700, marginBottom:8 }}>{sec.title}</div>
+          )}
+          {sec.note && mode === "pack" && <div style={{ fontSize:12.5, color:C.muted, marginBottom:8, lineHeight:1.4 }}>{sec.note}</div>}
+
+          <div style={{ background:C.card, border:"1px solid "+C.line, borderRadius:14, overflow:"hidden" }}>
+            {sec.vis.map((it, idx) => {
+              const on = !!checked[it.id]; const isOpen = expanded === it.id;
+              if (mode === "pack") {
+                return (
+                  <button key={it.id} onClick={() => toggle(it.id)} style={rowBtn(idx)}>
+                    <span style={box(on)}>{on?"✓":""}</span>
+                    <span style={{ flex:1 }}>
+                      <span style={{ fontSize:15.5, color:on?C.muted:C.ink, textDecoration:on?"line-through":"none" }}>{labelFor(it, nights, R)}</span>
+                      {it.hint && <span style={{ display:"block", fontSize:12, color:C.muted, marginTop:1 }}>{it.hint}</span>}
+                    </span>
+                  </button>
+                );
+              }
+              return (
+                <div key={it.id} style={{ borderTop: idx===0?"none":"1px solid "+C.line }}>
+                  <button onClick={() => setExpanded(isOpen ? null : it.id)} style={{ ...rowBtn(0), borderTop:"none" }}>
+                    <span style={{ flex:1, fontSize:15.5 }}>{labelFor(it, nights, R)}</span>
+                    <span style={{ fontSize:11, color:C.muted, border:"1px solid "+C.line, borderRadius:6, padding:"2px 6px", marginRight:8 }}>{it.scope==="all"?"Both":it.scope==="vac"?"Vacation":it.scope==="beach"?"Beach":"Golf"}</span>
+                    <span style={{ color:C.muted, fontSize:13 }}>{isOpen?"▲":"▾"}</span>
+                  </button>
+                  {isOpen && <ItemEditor sid={sec.id} item={it} nights={nights} R={R} trip={trip} updItem={updItem} updQty={updQty} delItem={delItem} close={() => setExpanded(null)} />}
+                </div>
+              );
+            })}
+            {mode === "edit" && (
+              <button onClick={() => addItem(sec.id)} style={{ ...rowBtn(sec.vis.length?1:0), color:C.fairway, fontWeight:700, fontSize:14.5 }}>
+                <span style={{ ...box(false), borderStyle:"dashed", color:C.fairway }}>+</span>Add item
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
+      {mode === "edit" && <button onClick={addSec} style={{ width:"100%", height:46, borderRadius:12, border:"1px dashed "+C.line, background:C.card, color:C.fairway, fontWeight:700, fontSize:15, cursor:"pointer", marginTop:4 }}>+ Add section</button>}
+    </>
+  );
+}
+
+function Shell({ children }) {
   return (
     <div style={{ minHeight:"100vh", background:C.paper, color:C.ink, fontFamily:"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
-      <div style={{ maxWidth:560, margin:"0 auto", padding:"20px 16px 72px" }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10, fontSize:12.5, color:C.muted }}>
-          <span style={{ display:"flex", alignItems:"center", gap:7, minWidth:0 }}>
-            {user && user.picture && <img src={user.picture} alt="" width={20} height={20} style={{ borderRadius:"50%" }} referrerPolicy="no-referrer" />}
-            <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{(user && (user.name || user.email)) || ""}{isAdmin ? " · admin" : ""}</span>
-          </span>
-          <button onClick={onSignOut} style={linkBtn(C.muted)}>Sign out</button>
-        </div>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
-          <h1 style={{ fontSize:24, fontWeight:800, letterSpacing:-0.5, margin:0 }}>Pack</h1>
-          <button onClick={() => { setMode(mode==="pack"?"edit":"pack"); setExpanded(null); }} style={{ height:36, padding:"0 16px", borderRadius:10, border:"1px solid "+(mode==="edit"?C.fairway:C.line), background: mode==="edit"?C.fairway:C.card, color: mode==="edit"?"#fff":C.ink, fontWeight:700, fontSize:14, cursor:"pointer" }}>{mode==="pack"?"Edit":"Done"}</button>
-        </div>
-
-        {mode === "pack" && (<>
-          <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>{packed}/{total} packed</div>
-          <div style={{ height:6, background:C.line, borderRadius:99, overflow:"hidden", marginBottom:18 }}><div style={{ width:pct+"%", height:"100%", background:C.fairway, transition:"width 200ms" }} /></div>
-        </>)}
-        {mode === "edit" && (
-          <div style={{ fontSize:13, color:C.muted, lineHeight:1.45, marginBottom:16 }}>
-            One shared list. Each item is tagged <b>Show on: Both / Golf / Vacation / Beach</b> \u2014 a <i>Both</i> item edited once updates every trip. Use the toggle to view a trip while editing. Tap <b>Save as my default</b> to lock the setup.
-          </div>
-        )}
-
-        <div style={{ display:"flex", gap:8, marginBottom:14 }}>
-          {[["golf","Golf trip"],["vacation","Vacation"]].map(([key,lbl]) => { const on = trip===key;
-            return <button key={key} onClick={() => { setTrip(key); setExpanded(null); }} style={{ flex:1, height:46, borderRadius:12, border:"1px solid "+(on?C.fairway:C.line), background:on?C.fairway:C.card, color:on?"#fff":C.ink, fontSize:15, fontWeight:700, cursor:"pointer" }}>{lbl}</button>; })}
-        </div>
-
-        <div style={{ display:"flex", gap:10, marginBottom:10 }}>
-          <div style={{ flex:1 }}><div style={lblStyle}>Nights</div><Stepper value={nights} set={setNights} min={1} max={60} /></div>
-          {trip === "golf" && <div style={{ flex:1 }}><div style={lblStyle}>Rounds</div><Stepper value={rounds} set={setRounds} min={0} max={30} /></div>}
-        </div>
-
-        {trip === "vacation" && <button onClick={() => setBeach((b) => !b)} style={{ width:"100%", height:42, borderRadius:12, border:"1px solid "+(beach?C.sand:C.line), background: beach?"#faf3e0":C.card, color:C.ink, fontSize:14, fontWeight:600, cursor:"pointer", marginBottom:6 }}>{beach?"\u2713 ":"+ "}Sun / beach add-on</button>}
-
-        {mode === "edit" ? (
-          <div style={{ background:C.card, border:"1px solid "+C.line, borderRadius:12, padding:12, margin:"12px 0 18px" }}>
-            <button onClick={saveDefault} style={{ width:"100%", height:42, borderRadius:10, border:"none", background: savedFlash?C.fairwayDk:C.fairway, color:"#fff", fontWeight:700, fontSize:14.5, cursor:"pointer" }}>{savedFlash?"\u2713 Saved as your default":"Save as my default"}</button>
-            <div style={{ display:"flex", justifyContent:"space-between", marginTop:11 }}>
-              <button onClick={resetTpl} style={linkBtn(C.muted)}>Reset to my default</button>
-              <button onClick={factoryReset} style={linkBtn(C.danger)}>Factory reset</button>
-            </div>
-          </div>
-        ) : (
-          <div style={{ display:"flex", justifyContent:"flex-end", margin:"12px 0 18px" }}>
-            <button onClick={() => setChecked({})} style={linkBtn(C.muted)}>Reset ticks</button>
-          </div>
-        )}
-
-        {sectionsView.map((sec) => (
-          <div key={sec.id} style={{ marginBottom:20 }}>
-            {mode === "edit" ? (
-              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
-                <input value={sec.title} onChange={(e) => updSec(sec.id, { title: e.target.value })} style={{ flex:1, fontSize:13, fontWeight:700, color:C.fairwayDk, textTransform:"uppercase", letterSpacing:1, border:"none", borderBottom:"1px solid "+C.line, background:"transparent", padding:"4px 0", outline:"none" }} />
-                <button onClick={() => delSec(sec.id)} style={{ border:"none", background:"transparent", color:C.danger, fontSize:18, cursor:"pointer", lineHeight:1 }}>{"\u2715"}</button>
-              </div>
-            ) : (
-              <div style={{ fontSize:12, letterSpacing:1.5, textTransform:"uppercase", color:C.fairwayDk, fontWeight:700, marginBottom:8 }}>{sec.title}</div>
-            )}
-            {sec.note && mode === "pack" && <div style={{ fontSize:12.5, color:C.muted, marginBottom:8, lineHeight:1.4 }}>{sec.note}</div>}
-
-            <div style={{ background:C.card, border:"1px solid "+C.line, borderRadius:14, overflow:"hidden" }}>
-              {sec.vis.map((it, idx) => {
-                const on = !!checked[it.id]; const isOpen = expanded === it.id;
-                if (mode === "pack") {
-                  return (
-                    <button key={it.id} onClick={() => toggle(it.id)} style={rowBtn(idx)}>
-                      <span style={box(on)}>{on?"\u2713":""}</span>
-                      <span style={{ flex:1 }}>
-                        <span style={{ fontSize:15.5, color:on?C.muted:C.ink, textDecoration:on?"line-through":"none" }}>{labelFor(it, nights, R)}</span>
-                        {it.hint && <span style={{ display:"block", fontSize:12, color:C.muted, marginTop:1 }}>{it.hint}</span>}
-                      </span>
-                    </button>
-                  );
-                }
-                return (
-                  <div key={it.id} style={{ borderTop: idx===0?"none":"1px solid "+C.line }}>
-                    <button onClick={() => setExpanded(isOpen ? null : it.id)} style={{ ...rowBtn(0), borderTop:"none" }}>
-                      <span style={{ flex:1, fontSize:15.5 }}>{labelFor(it, nights, R)}</span>
-                      <span style={{ fontSize:11, color:C.muted, border:"1px solid "+C.line, borderRadius:6, padding:"2px 6px", marginRight:8 }}>{it.scope==="all"?"Both":it.scope==="vac"?"Vacation":it.scope==="beach"?"Beach":"Golf"}</span>
-                      <span style={{ color:C.muted, fontSize:13 }}>{isOpen?"\u25b2":"\u25be"}</span>
-                    </button>
-                    {isOpen && <ItemEditor sid={sec.id} item={it} nights={nights} R={R} trip={trip} updItem={updItem} updQty={updQty} delItem={delItem} close={() => setExpanded(null)} />}
-                  </div>
-                );
-              })}
-              {mode === "edit" && (
-                <button onClick={() => addItem(sec.id)} style={{ ...rowBtn(sec.vis.length?1:0), color:C.fairway, fontWeight:700, fontSize:14.5 }}>
-                  <span style={{ ...box(false), borderStyle:"dashed", color:C.fairway }}>+</span>Add item
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-
-        {mode === "edit" && <button onClick={addSec} style={{ width:"100%", height:46, borderRadius:12, border:"1px dashed "+C.line, background:C.card, color:C.fairway, fontWeight:700, fontSize:15, cursor:"pointer", marginTop:4 }}>+ Add section</button>}
-        {mode === "pack" && <div style={{ textAlign:"center", fontSize:11.5, color:C.muted, marginTop:8 }}>Tap <b>Edit</b> to change items, tags, or quantity rules.</div>}
-      </div>
+      <div style={{ maxWidth:560, margin:"0 auto", padding:"20px 16px 72px" }}>{children}</div>
     </div>
   );
+}
+
+function Home({ user, isAdmin, onSignOut, trips, onOpen, onNew, onEditDefault, onDelete }) {
+  return (
+    <Shell>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, fontSize:12.5, color:C.muted }}>
+        <span style={{ display:"flex", alignItems:"center", gap:7, minWidth:0 }}>
+          {user && user.picture && <img src={user.picture} alt="" width={20} height={20} style={{ borderRadius:"50%" }} referrerPolicy="no-referrer" />}
+          <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{(user && (user.name || user.email)) || ""}{isAdmin ? " · admin" : ""}</span>
+        </span>
+        <button onClick={onSignOut} style={linkBtn(C.muted)}>Sign out</button>
+      </div>
+      <h1 style={{ fontSize:24, fontWeight:800, letterSpacing:-0.5, margin:"0 0 14px" }}>Trips</h1>
+      <button onClick={onNew} style={{ width:"100%", height:48, borderRadius:12, border:"none", background:C.fairway, color:"#fff", fontWeight:700, fontSize:15.5, cursor:"pointer", marginBottom:16 }}>+ New trip</button>
+      {trips.length === 0 ? (
+        <div style={{ textAlign:"center", color:C.muted, fontSize:14, padding:"30px 10px", lineHeight:1.5 }}>No trips yet.<br />Tap <b>+ New trip</b> to plan your first one.</div>
+      ) : (
+        trips.map((t) => {
+          const p = tripProgress(t);
+          const dates = t.startDate && t.endDate ? fmtDate(t.startDate)+" – "+fmtDate(t.endDate) : (t.nights ? t.nights+" nights" : "");
+          const meta = [dates, t.type==="golf" ? ((t.rounds||0)+" rounds") : (t.beach ? "beach" : "")].filter(Boolean).join(" · ");
+          return (
+            <div key={t.id} style={{ display:"flex", alignItems:"center", gap:6, background:C.card, border:"1px solid "+C.line, borderRadius:14, padding:"10px 12px", marginBottom:10 }}>
+              <button onClick={() => onOpen(t.id)} style={{ flex:1, display:"flex", alignItems:"center", gap:12, border:"none", background:"transparent", textAlign:"left", cursor:"pointer", minWidth:0 }}>
+                <span style={{ fontSize:24 }}>{tripIcon(t.type)}</span>
+                <span style={{ flex:1, minWidth:0 }}>
+                  <span style={{ display:"block", fontSize:16, fontWeight:700, color:C.ink, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{t.name || (t.type==="golf"?"Golf trip":"Vacation")}</span>
+                  <span style={{ display:"block", fontSize:12.5, color:C.muted, marginTop:1 }}>{meta}</span>
+                </span>
+                <span style={{ fontSize:12, color:C.muted, fontWeight:600 }}>{p.packed}/{p.total}</span>
+              </button>
+              <button onClick={() => onDelete(t.id)} title="Delete trip" style={{ border:"none", background:"transparent", color:C.muted, fontSize:17, cursor:"pointer", lineHeight:1, padding:"4px 6px" }}>{"✕"}</button>
+            </div>
+          );
+        })
+      )}
+      <div style={{ marginTop:18, textAlign:"center" }}>
+        <button onClick={onEditDefault} style={linkBtn(C.muted)}>Edit my default packing list</button>
+      </div>
+    </Shell>
+  );
+}
+
+function NewTripForm({ defaultProfile, onCreate, onCancel }) {
+  const [name, setName] = useState("");
+  const [type, setType] = useState("golf");
+  const [startDate, setStart] = useState("");
+  const [endDate, setEnd] = useState("");
+  const [rounds, setRounds] = useState(4);
+  const [beach, setBeach] = useState(false);
+  const [notes, setNotes] = useState("");
+  const derived = nightsFromDates(startDate, endDate);
+  const create = () => {
+    onCreate({ id: uid("t"), name: name.trim(), type, startDate, endDate,
+      nights: derived != null ? derived : 3, rounds, beach, notes: notes.trim(),
+      inventory: JSON.parse(JSON.stringify(defaultProfile)), checked: {}, createdAt: 0 });
+  };
+  return (
+    <Shell>
+      <button onClick={onCancel} style={{ ...linkBtn(C.muted), marginBottom:14 }}>{"← Trips"}</button>
+      <h1 style={{ fontSize:22, fontWeight:800, margin:"0 0 14px" }}>New trip</h1>
+      <div style={lblStyle}>Trip name</div>
+      <input value={name} onChange={(e)=>setName(e.target.value)} placeholder={type==="golf"?"e.g. Spain golf week":"e.g. Italy summer"} style={textInput} />
+      <div style={lblStyle}>Type</div>
+      <div style={{ display:"flex", gap:8 }}>
+        {[["golf","⛳ Golf"],["vacation","🏖️ Vacation"]].map(([k,l]) => (
+          <button key={k} onClick={()=>setType(k)} style={{ ...pill(type===k), height:44, fontSize:14 }}>{l}</button>
+        ))}
+      </div>
+      <div style={{ display:"flex", gap:10 }}>
+        <div style={{ flex:1 }}><div style={lblStyle}>Start</div><input type="date" value={startDate} onChange={(e)=>setStart(e.target.value)} style={textInput} /></div>
+        <div style={{ flex:1 }}><div style={lblStyle}>End</div><input type="date" value={endDate} onChange={(e)=>setEnd(e.target.value)} style={textInput} /></div>
+      </div>
+      <div style={{ fontSize:12.5, color:C.muted, margin:"6px 2px 0" }}>{derived != null ? derived+" nights" : "Pick dates to set nights (defaults to 3)."}</div>
+      {type==="golf" && <div style={{ marginTop:12 }}><div style={lblStyle}>Rounds</div><div style={{ width:140 }}><Stepper value={rounds} set={setRounds} min={0} max={30} /></div></div>}
+      {type==="vacation" && <button onClick={()=>setBeach(b=>!b)} style={{ width:"100%", height:44, borderRadius:12, border:"1px solid "+(beach?C.sand:C.line), background:beach?"#faf3e0":C.card, color:C.ink, fontSize:14, fontWeight:600, cursor:"pointer", marginTop:12 }}>{beach?"✓ ":"+ "}Sun / beach add-on</button>}
+      <div style={lblStyle}>Notes (optional)</div>
+      <input value={notes} onChange={(e)=>setNotes(e.target.value)} placeholder="flight times, hotel, etc." style={textInput} />
+      <button onClick={create} style={{ width:"100%", height:48, borderRadius:12, border:"none", background:C.fairway, color:"#fff", fontWeight:700, fontSize:15.5, cursor:"pointer", marginTop:20 }}>Create trip</button>
+    </Shell>
+  );
+}
+
+function TripView({ trip, onPatch, onSetInventory, onSetChecked, onBack, onSaveDefault }) {
+  const [mode, setMode] = useState("pack");
+  const [expanded, setExpanded] = useState(null);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const nights = trip.nights || 3;
+  const p = tripProgress(trip);
+  const pct = p.total ? Math.round((p.packed / p.total) * 100) : 0;
+  const setDate = (patch) => { const next = { ...trip, ...patch }; const d = nightsFromDates(next.startDate, next.endDate); onPatch(d != null ? { ...patch, nights: d } : patch); };
+  const saveDefault = () => { onSaveDefault(trip.inventory); setSavedFlash(true); setTimeout(() => setSavedFlash(false), 1600); };
+
+  return (
+    <Shell>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+        <button onClick={onBack} style={linkBtn(C.muted)}>{"← Trips"}</button>
+        <button onClick={() => { setMode(mode==="pack"?"edit":"pack"); setExpanded(null); }} style={{ height:36, padding:"0 16px", borderRadius:10, border:"1px solid "+(mode==="edit"?C.fairway:C.line), background: mode==="edit"?C.fairway:C.card, color: mode==="edit"?"#fff":C.ink, fontWeight:700, fontSize:14, cursor:"pointer" }}>{mode==="pack"?"Edit list":"Done"}</button>
+      </div>
+
+      {mode==="edit" ? (
+        <input value={trip.name} onChange={(e)=>onPatch({ name:e.target.value })} placeholder="Trip name" style={{ ...textInput, fontSize:21, fontWeight:800, padding:"8px 10px", marginBottom:10 }} />
+      ) : (
+        <h1 style={{ fontSize:23, fontWeight:800, letterSpacing:-0.5, margin:"0 0 4px" }}>{trip.name || (trip.type==="golf"?"Golf trip":"Vacation")} <span style={{ fontSize:20 }}>{tripIcon(trip.type)}</span></h1>
+      )}
+
+      {mode==="pack" && (<>
+        <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>{p.packed}/{p.total} packed{trip.startDate && trip.endDate ? " · "+fmtDate(trip.startDate)+" – "+fmtDate(trip.endDate) : ""}{trip.notes ? " · "+trip.notes : ""}</div>
+        <div style={{ height:6, background:C.line, borderRadius:99, overflow:"hidden", marginBottom:18 }}><div style={{ width:pct+"%", height:"100%", background:C.fairway, transition:"width 200ms" }} /></div>
+      </>)}
+
+      <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+        {[["golf","Golf"],["vacation","Vacation"]].map(([k,l]) => (
+          <button key={k} onClick={()=>{ onPatch({ type:k }); setExpanded(null); }} style={{ flex:1, height:42, borderRadius:12, border:"1px solid "+(trip.type===k?C.fairway:C.line), background:trip.type===k?C.fairway:C.card, color:trip.type===k?"#fff":C.ink, fontSize:14.5, fontWeight:700, cursor:"pointer" }}>{l}</button>
+        ))}
+      </div>
+
+      {mode==="edit" && (
+        <div style={{ display:"flex", gap:10, marginBottom:10 }}>
+          <div style={{ flex:1 }}><div style={lblStyle}>Start</div><input type="date" value={trip.startDate||""} onChange={(e)=>setDate({ startDate:e.target.value })} style={textInput} /></div>
+          <div style={{ flex:1 }}><div style={lblStyle}>End</div><input type="date" value={trip.endDate||""} onChange={(e)=>setDate({ endDate:e.target.value })} style={textInput} /></div>
+        </div>
+      )}
+
+      <div style={{ display:"flex", gap:10, marginBottom:10 }}>
+        <div style={{ flex:1 }}><div style={lblStyle}>Nights</div><Stepper value={nights} set={(v)=>onPatch({ nights:v })} min={1} max={60} /></div>
+        {trip.type==="golf" && <div style={{ flex:1 }}><div style={lblStyle}>Rounds</div><Stepper value={trip.rounds||0} set={(v)=>onPatch({ rounds:v })} min={0} max={30} /></div>}
+      </div>
+      {trip.type==="vacation" && <button onClick={()=>onPatch({ beach: !trip.beach })} style={{ width:"100%", height:42, borderRadius:12, border:"1px solid "+(trip.beach?C.sand:C.line), background: trip.beach?"#faf3e0":C.card, color:C.ink, fontSize:14, fontWeight:600, cursor:"pointer", marginBottom:6 }}>{trip.beach?"✓ ":"+ "}Sun / beach add-on</button>}
+
+      {mode==="edit" ? (
+        <div style={{ background:C.card, border:"1px solid "+C.line, borderRadius:12, padding:12, margin:"12px 0 18px" }}>
+          <button onClick={saveDefault} style={{ width:"100%", height:42, borderRadius:10, border:"none", background: savedFlash?C.fairwayDk:C.fairway, color:"#fff", fontWeight:700, fontSize:14.5, cursor:"pointer" }}>{savedFlash?"✓ Saved as your default":"Save this list as my default"}</button>
+          <div style={{ fontSize:12, color:C.muted, marginTop:8, lineHeight:1.4 }}>Editing changes <b>this trip only</b>. Save as default to reuse it for future trips.</div>
+        </div>
+      ) : (
+        <div style={{ display:"flex", justifyContent:"flex-end", margin:"12px 0 18px" }}>
+          <button onClick={()=>onSetChecked({})} style={linkBtn(C.muted)}>Reset ticks</button>
+        </div>
+      )}
+
+      <PackList tpl={trip.inventory} setTpl={onSetInventory} mode={mode} trip={trip.type} nights={nights} rounds={trip.rounds||0} beach={trip.beach} checked={trip.checked||{}} setChecked={onSetChecked} expanded={expanded} setExpanded={setExpanded} />
+
+      {mode==="pack" && <div style={{ textAlign:"center", fontSize:11.5, color:C.muted, marginTop:8 }}>Tap <b>Edit list</b> to change items, tags, or quantity rules for this trip.</div>}
+    </Shell>
+  );
+}
+
+function DefaultEditor({ profile, setProfile, onBack }) {
+  const [scope, setScope] = useState("golf");
+  const [expanded, setExpanded] = useState(null);
+  const [nights, setNights] = useState(3);
+  const [rounds, setRounds] = useState(4);
+  return (
+    <Shell>
+      <button onClick={onBack} style={{ ...linkBtn(C.muted), marginBottom:12 }}>{"← Trips"}</button>
+      <h1 style={{ fontSize:22, fontWeight:800, margin:"0 0 4px" }}>Default packing list</h1>
+      <p style={{ fontSize:13, color:C.muted, lineHeight:1.45, margin:"0 0 14px" }}>New trips start from this list. Items are tagged <b>Both / Golf / Vacation / Beach</b>; switch the view to edit each scope. Quantity previews use the sample nights/rounds below.</p>
+      <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+        {[["golf","Golf view"],["vacation","Vacation view"]].map(([k,l]) => (
+          <button key={k} onClick={()=>{ setScope(k); setExpanded(null); }} style={{ flex:1, height:42, borderRadius:12, border:"1px solid "+(scope===k?C.fairway:C.line), background:scope===k?C.fairway:C.card, color:scope===k?"#fff":C.ink, fontSize:14, fontWeight:700, cursor:"pointer" }}>{l}</button>
+        ))}
+      </div>
+      <div style={{ display:"flex", gap:10, marginBottom:16 }}>
+        <div style={{ flex:1 }}><div style={lblStyle}>Sample nights</div><Stepper value={nights} set={setNights} min={1} max={60} /></div>
+        {scope==="golf" && <div style={{ flex:1 }}><div style={lblStyle}>Sample rounds</div><Stepper value={rounds} set={setRounds} min={0} max={30} /></div>}
+      </div>
+      <PackList tpl={profile} setTpl={setProfile} mode="edit" trip={scope} nights={nights} rounds={rounds} beach={true} checked={{}} setChecked={()=>{}} expanded={expanded} setExpanded={setExpanded} />
+    </Shell>
+  );
+}
+
+function PackingAppV2({ user, isAdmin, onSignOut }) {
+  const [data, setData] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const [view, setView] = useState({ name: "home" });
+
+  useEffect(() => { (async () => {
+    let d = null;
+    try { const r = await store.get("v5"); if (r && r.value) d = JSON.parse(r.value); } catch (e) {}
+    if (!d) d = await migrateToV5();
+    setData(d); setLoaded(true);
+  })(); }, []);
+
+  useEffect(() => { if (loaded && data) store.set("v5", JSON.stringify(data)); }, [data, loaded]);
+
+  const updateTrip = (id, patch) => setData((d) => ({ ...d, trips: d.trips.map((t) => t.id===id ? { ...t, ...patch } : t) }));
+  const setTripInventory = (id, u) => setData((d) => ({ ...d, trips: d.trips.map((t) => t.id===id ? { ...t, inventory: typeof u==="function" ? u(t.inventory) : u } : t) }));
+  const setTripChecked = (id, u) => setData((d) => ({ ...d, trips: d.trips.map((t) => t.id===id ? { ...t, checked: typeof u==="function" ? u(t.checked||{}) : u } : t) }));
+  const addTrip = (trip) => { setData((d) => ({ ...d, trips: [trip, ...d.trips] })); setView({ name:"trip", id: trip.id }); };
+  const deleteTrip = (id) => { if (typeof window !== "undefined" && !window.confirm("Delete this trip?")) return; setData((d) => ({ ...d, trips: d.trips.filter((t) => t.id!==id) })); setView({ name:"home" }); };
+  const setProfile = (u) => setData((d) => ({ ...d, profileDefault: typeof u==="function" ? u(d.profileDefault) : u }));
+  const saveAsDefault = (inv) => setData((d) => ({ ...d, profileDefault: JSON.parse(JSON.stringify(inv)) }));
+
+  if (!loaded || !data) return <Splash text={"Loading your trips…"} />;
+  if (view.name === "new") return <NewTripForm defaultProfile={data.profileDefault} onCreate={addTrip} onCancel={()=>setView({ name:"home" })} />;
+  if (view.name === "default") return <DefaultEditor profile={data.profileDefault} setProfile={setProfile} onBack={()=>setView({ name:"home" })} />;
+  if (view.name === "trip") {
+    const trip = data.trips.find((t) => t.id === view.id);
+    if (!trip) return <Home user={user} isAdmin={isAdmin} onSignOut={onSignOut} trips={data.trips} onOpen={(id)=>setView({ name:"trip", id })} onNew={()=>setView({ name:"new" })} onEditDefault={()=>setView({ name:"default" })} onDelete={deleteTrip} />;
+    return <TripView trip={trip} onPatch={(p)=>updateTrip(trip.id, p)} onSetInventory={(u)=>setTripInventory(trip.id, u)} onSetChecked={(u)=>setTripChecked(trip.id, u)} onBack={()=>setView({ name:"home" })} onSaveDefault={saveAsDefault} />;
+  }
+  return <Home user={user} isAdmin={isAdmin} onSignOut={onSignOut} trips={data.trips} onOpen={(id)=>setView({ name:"trip", id })} onNew={()=>setView({ name:"new" })} onEditDefault={()=>setView({ name:"default" })} onDelete={deleteTrip} />;
 }
 
 function LoginScreen({ error }) {
@@ -441,5 +596,5 @@ export default function App() {
   if (!user) return <LoginScreen error={authMsg} />;
   if (!isAllowedEmail(user.email)) return <NotInvited email={user.email} onSignOut={signOut} />;
   if (!ready) return <Splash text={"Loading your lists…"} />;
-  return <PackingApp user={user} isAdmin={isAdminEmail(user.email)} onSignOut={signOut} />;
+  return <PackingAppV2 user={user} isAdmin={isAdminEmail(user.email)} onSignOut={signOut} />;
 }
