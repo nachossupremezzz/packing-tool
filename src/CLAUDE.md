@@ -2,6 +2,8 @@
 
 Personal travel packing checklist web app. Two trip types (**golf**, **vacation**) share **one** item list; each item is tagged where it shows, and quantities compute from trip length. Mobile-first.
 
+**Evolving into an invite-only multi-user app** (accounts, per-trip lists, admin) — full plan, data model, and security posture in [DESIGN.md](../DESIGN.md). Phase 1 (Google login + per-user data) in progress.
+
 ## Stack
 - Vite + React (plain JS, no TypeScript).
 - All UI is inline-styled — no CSS framework. Global reset lives in `src/index.css`.
