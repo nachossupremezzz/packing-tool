@@ -4,11 +4,10 @@ import { useState, useEffect } from "react";
 const SYNC_URL = import.meta.env.VITE_SYNC_URL || "https://hook.eu1.make.com/9sj1gxhjebty57hamg2a9elteipdqbvb";
 const APP_SECRET = import.meta.env.VITE_APP_SECRET || "pktool_s3cr3t_2f8a"; // webhook speed-bump (public, not real security)
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "530393865659-hol5hh4c4vmft191fmjctkuk4fd4685b.apps.googleusercontent.com"; // public OAuth client id
-const ADMIN_EMAILS = ["jonas.takolander@gmail.com"];
-const isAdminEmail = (e) => !!e && ADMIN_EMAILS.includes(String(e).toLowerCase());
-// Invite-only access. Add invitee emails here (Phase 3 will manage this in the admin panel).
-const ALLOWED_EMAILS = ["jonas.takolander@gmail.com"];
-const isAllowedEmail = (e) => !!e && ALLOWED_EMAILS.includes(String(e).toLowerCase());
+const ADMIN_EMAILS = ["jonas.takolander@gmail.com"]; // root owner(s): always admin + allowed (bootstrap, can't be locked out)
+const ALLOWED_EMAILS = ["jonas.takolander@gmail.com"]; // base invite list; admins add more via the panel (stored in app:defaults)
+const OWNER_EMAIL = "jonas.takolander@gmail.com"; // original single-list user; only they inherit the legacy "shared" record
+const lc = (x) => String(x || "").toLowerCase();
 
 // ---- Auth helpers (Google Identity Services) ----
 const AUTH_LS = "packing:auth"; // cached identity { email, name, picture }
@@ -49,6 +48,19 @@ async function remoteGet(key) {
   let obj = null; try { obj = txt ? JSON.parse(txt) : {}; } catch (e) { obj = {}; } // "Accepted"/missing -> {}
   return obj && typeof obj === "object" ? obj : {};
 }
+
+function remoteSet(key, value) {
+  return fetch(SYNC_URL + "?api=set&secret=" + encodeURIComponent(APP_SECRET) + "&key=" + encodeURIComponent(key), {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "value=" + encodeURIComponent(value),
+  });
+}
+
+// ---- App-wide config (admin-managed record): { template, admins, allowed } ----
+const CONFIG_KEY = "app:defaults";
+async function loadAppConfig() { try { const c = await remoteGet(CONFIG_KEY); if (c && typeof c === "object") return c; } catch (e) {} return {}; }
+async function saveAppConfig(cfg) { try { await remoteSet(CONFIG_KEY, JSON.stringify(cfg)); return true; } catch (e) { return false; } }
+function resolveIsAdmin(email, cfg) { const e = lc(email); return !!e && (ADMIN_EMAILS.includes(e) || ((cfg && cfg.admins) || []).map(lc).includes(e)); }
+function resolveIsAllowed(email, cfg) { const e = lc(email); return resolveIsAdmin(email, cfg) || ALLOWED_EMAILS.includes(e) || ((cfg && cfg.allowed) || []).map(lc).includes(e); }
 
 // Initialise the adapter for a signed-in user; resolves once the cache is ready.
 async function initUser(email, isAdmin) {
@@ -224,13 +236,13 @@ function tripProgress(trip) {
 }
 
 // First-run migration of the single-list (Phase 1) layout into the multi-trip (v5) shape.
-async function migrateToV5() {
+async function migrateToV5(appTemplate) {
   const getJson = async (k) => { try { const r = await store.get(k); return r && r.value ? JSON.parse(r.value) : null; } catch (e) { return null; } };
   const tpl = await getJson("packing:v4:tpl");
   const settings = await getJson("packing:v2:settings");
   const checked = await getJson("packing:v4:checked");
   const userdef = await getJson("packing:v4:userdef");
-  const profileDefault = userdef || tpl || makeDefaults();
+  const profileDefault = userdef || tpl || (appTemplate ? JSON.parse(JSON.stringify(appTemplate)) : makeDefaults());
   const trips = [];
   if (tpl) {
     trips.push({ id: uid("t"), name: "My trip", type: (settings && settings.trip) || "golf",
@@ -316,7 +328,7 @@ function Shell({ children }) {
   );
 }
 
-function Home({ user, isAdmin, onSignOut, trips, onOpen, onNew, onEditDefault, onDelete }) {
+function Home({ user, isAdmin, onSignOut, trips, onOpen, onNew, onEditDefault, onDelete, onAdmin }) {
   return (
     <Shell>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, fontSize:12.5, color:C.muted }}>
@@ -350,8 +362,9 @@ function Home({ user, isAdmin, onSignOut, trips, onOpen, onNew, onEditDefault, o
           );
         })
       )}
-      <div style={{ marginTop:18, textAlign:"center" }}>
+      <div style={{ marginTop:18, textAlign:"center", display:"flex", flexDirection:"column", gap:12 }}>
         <button onClick={onEditDefault} style={linkBtn(C.muted)}>Edit my default packing list</button>
+        {onAdmin && <button onClick={onAdmin} style={linkBtn(C.fairwayDk)}>Admin · members &amp; global default</button>}
       </div>
     </Shell>
   );
@@ -486,7 +499,86 @@ function DefaultEditor({ profile, setProfile, onBack }) {
   );
 }
 
-function PackingAppV2({ user, isAdmin, onSignOut }) {
+function AdminPanel({ cfg, onSave, onBack }) {
+  const [tab, setTab] = useState("members");
+  const [admins, setAdmins] = useState(() => ((cfg && cfg.admins) || []).slice());
+  const [allowed, setAllowed] = useState(() => ((cfg && cfg.allowed) || []).slice());
+  const [template, setTemplate] = useState(() => (cfg && cfg.template) ? JSON.parse(JSON.stringify(cfg.template)) : makeDefaults());
+  const [newEmail, setNewEmail] = useState("");
+  const [scope, setScope] = useState("golf");
+  const [expanded, setExpanded] = useState(null);
+  const [nights, setNights] = useState(3);
+  const [rounds, setRounds] = useState(4);
+  const [flash, setFlash] = useState("");
+
+  const addEmail = () => {
+    const e = lc(newEmail.trim());
+    if (!e || !e.includes("@")) return;
+    if (!allowed.map(lc).includes(e) && !ADMIN_EMAILS.includes(e)) setAllowed([...allowed, e]);
+    setNewEmail("");
+  };
+  const removeEmail = (e) => { setAllowed(allowed.filter((x) => lc(x) !== lc(e))); setAdmins(admins.filter((x) => lc(x) !== lc(e))); };
+  const toggleAdmin = (e) => { const le = lc(e); setAdmins(admins.map(lc).includes(le) ? admins.filter((x) => lc(x) !== le) : [...admins, e]); };
+  const save = async () => { await onSave({ template, admins, allowed }); setFlash("✓ Saved"); setTimeout(() => setFlash(""), 1600); };
+
+  const rows = [
+    ...ADMIN_EMAILS.map((e) => ({ email: e, admin: true, root: true })),
+    ...allowed.filter((e) => !ADMIN_EMAILS.includes(lc(e))).map((e) => ({ email: e, admin: admins.map(lc).includes(lc(e)), root: false })),
+  ];
+
+  return (
+    <Shell>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+        <button onClick={onBack} style={linkBtn(C.muted)}>{"← Trips"}</button>
+        <button onClick={save} style={{ height:36, padding:"0 16px", borderRadius:10, border:"none", background: flash?C.fairwayDk:C.fairway, color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>{flash || "Save"}</button>
+      </div>
+      <h1 style={{ fontSize:22, fontWeight:800, margin:"0 0 12px" }}>Admin</h1>
+      <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+        {[["members","Members"],["list","Default list"]].map(([k,l]) => (
+          <button key={k} onClick={()=>setTab(k)} style={{ ...pill(tab===k), height:40, fontSize:13.5 }}>{l}</button>
+        ))}
+      </div>
+
+      {tab==="members" && (
+        <div>
+          <p style={{ fontSize:13, color:C.muted, lineHeight:1.45, margin:"0 0 12px" }}>Invite people by their Google account email. Admins can edit this panel. <b>Save</b> to apply.</p>
+          <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+            <input value={newEmail} onChange={(e)=>setNewEmail(e.target.value)} onKeyDown={(e)=>{ if (e.key==="Enter") addEmail(); }} placeholder="name@gmail.com" style={{ ...textInput, flex:1 }} />
+            <button onClick={addEmail} style={{ height:42, padding:"0 16px", borderRadius:10, border:"none", background:C.fairway, color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>Add</button>
+          </div>
+          <div style={{ background:C.card, border:"1px solid "+C.line, borderRadius:14, overflow:"hidden" }}>
+            {rows.map((m, idx) => (
+              <div key={m.email} style={{ display:"flex", alignItems:"center", gap:10, padding:"11px 14px", borderTop: idx===0?"none":"1px solid "+C.line }}>
+                <span style={{ flex:1, minWidth:0, fontSize:14, color:C.ink, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{m.email}{m.root && <span style={{ color:C.muted, fontSize:12 }}> · owner</span>}</span>
+                <button disabled={m.root} onClick={()=>toggleAdmin(m.email)} style={{ border:"1px solid "+(m.admin?C.fairway:C.line), background:m.admin?C.fairway:C.card, color:m.admin?"#fff":C.muted, borderRadius:8, padding:"4px 9px", fontSize:12, fontWeight:600, cursor:m.root?"default":"pointer", opacity:m.root?0.6:1 }}>admin</button>
+                {!m.root && <button onClick={()=>removeEmail(m.email)} title="Remove" style={{ border:"none", background:"transparent", color:C.danger, fontSize:16, cursor:"pointer", lineHeight:1 }}>{"✕"}</button>}
+              </div>
+            ))}
+          </div>
+          <p style={{ fontSize:11.5, color:C.muted, marginTop:10, lineHeight:1.4 }}>Access is enforced in-app (trust-based — see DESIGN.md). The owner can't be removed.</p>
+        </div>
+      )}
+
+      {tab==="list" && (
+        <div>
+          <p style={{ fontSize:13, color:C.muted, lineHeight:1.45, margin:"0 0 12px" }}>The starting list for <b>new members</b>. Existing members keep their own. Switch view to edit each scope; <b>Save</b> to apply.</p>
+          <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+            {[["golf","Golf view"],["vacation","Vacation view"]].map(([k,l]) => (
+              <button key={k} onClick={()=>{ setScope(k); setExpanded(null); }} style={{ flex:1, height:42, borderRadius:12, border:"1px solid "+(scope===k?C.fairway:C.line), background:scope===k?C.fairway:C.card, color:scope===k?"#fff":C.ink, fontSize:14, fontWeight:700, cursor:"pointer" }}>{l}</button>
+            ))}
+          </div>
+          <div style={{ display:"flex", gap:10, marginBottom:16 }}>
+            <div style={{ flex:1 }}><div style={lblStyle}>Sample nights</div><Stepper value={nights} set={setNights} min={1} max={60} /></div>
+            {scope==="golf" && <div style={{ flex:1 }}><div style={lblStyle}>Sample rounds</div><Stepper value={rounds} set={setRounds} min={0} max={30} /></div>}
+          </div>
+          <PackList tpl={template} setTpl={setTemplate} mode="edit" trip={scope} nights={nights} rounds={rounds} beach={true} checked={{}} setChecked={()=>{}} expanded={expanded} setExpanded={setExpanded} />
+        </div>
+      )}
+    </Shell>
+  );
+}
+
+function PackingAppV2({ user, isAdmin, cfg, onCfgChange, onSignOut }) {
   const [data, setData] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState({ name: "home" });
@@ -494,9 +586,12 @@ function PackingAppV2({ user, isAdmin, onSignOut }) {
   useEffect(() => { (async () => {
     let d = null;
     try { const r = await store.get("v5"); if (r && r.value) d = JSON.parse(r.value); } catch (e) {}
-    if (!d) d = await migrateToV5();
+    if (!d) d = await migrateToV5(cfg && cfg.template);
     setData(d); setLoaded(true);
-  })(); }, []);
+  })();
+  // cfg is already loaded before this view mounts; load the user's data once.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => { if (loaded && data) store.set("v5", JSON.stringify(data)); }, [data, loaded]);
 
@@ -507,16 +602,18 @@ function PackingAppV2({ user, isAdmin, onSignOut }) {
   const deleteTrip = (id) => { if (typeof window !== "undefined" && !window.confirm("Delete this trip?")) return; setData((d) => ({ ...d, trips: d.trips.filter((t) => t.id!==id) })); setView({ name:"home" }); };
   const setProfile = (u) => setData((d) => ({ ...d, profileDefault: typeof u==="function" ? u(d.profileDefault) : u }));
   const saveAsDefault = (inv) => setData((d) => ({ ...d, profileDefault: JSON.parse(JSON.stringify(inv)) }));
+  const saveConfig = async (next) => { await saveAppConfig(next); if (onCfgChange) onCfgChange(next); };
 
   if (!loaded || !data) return <Splash text={"Loading your trips…"} />;
+  if (view.name === "admin") return <AdminPanel cfg={cfg} onSave={saveConfig} onBack={()=>setView({ name:"home" })} />;
   if (view.name === "new") return <NewTripForm defaultProfile={data.profileDefault} onCreate={addTrip} onCancel={()=>setView({ name:"home" })} />;
   if (view.name === "default") return <DefaultEditor profile={data.profileDefault} setProfile={setProfile} onBack={()=>setView({ name:"home" })} />;
   if (view.name === "trip") {
     const trip = data.trips.find((t) => t.id === view.id);
-    if (!trip) return <Home user={user} isAdmin={isAdmin} onSignOut={onSignOut} trips={data.trips} onOpen={(id)=>setView({ name:"trip", id })} onNew={()=>setView({ name:"new" })} onEditDefault={()=>setView({ name:"default" })} onDelete={deleteTrip} />;
+    if (!trip) return <Home user={user} isAdmin={isAdmin} onSignOut={onSignOut} trips={data.trips} onOpen={(id)=>setView({ name:"trip", id })} onNew={()=>setView({ name:"new" })} onEditDefault={()=>setView({ name:"default" })} onDelete={deleteTrip} onAdmin={isAdmin ? ()=>setView({ name:"admin" }) : null} />;
     return <TripView trip={trip} onPatch={(p)=>updateTrip(trip.id, p)} onSetInventory={(u)=>setTripInventory(trip.id, u)} onSetChecked={(u)=>setTripChecked(trip.id, u)} onBack={()=>setView({ name:"home" })} onSaveDefault={saveAsDefault} />;
   }
-  return <Home user={user} isAdmin={isAdmin} onSignOut={onSignOut} trips={data.trips} onOpen={(id)=>setView({ name:"trip", id })} onNew={()=>setView({ name:"new" })} onEditDefault={()=>setView({ name:"default" })} onDelete={deleteTrip} />;
+  return <Home user={user} isAdmin={isAdmin} onSignOut={onSignOut} trips={data.trips} onOpen={(id)=>setView({ name:"trip", id })} onNew={()=>setView({ name:"new" })} onEditDefault={()=>setView({ name:"default" })} onDelete={deleteTrip} onAdmin={isAdmin ? ()=>setView({ name:"admin" }) : null} />;
 }
 
 function LoginScreen({ error }) {
@@ -552,14 +649,21 @@ function NotInvited({ email, onSignOut }) {
 
 export default function App() {
   const [user, setUser] = useState(cachedIdentity);
+  const [cfg, setCfg] = useState(null);
   const [ready, setReady] = useState(false);
   const [authMsg, setAuthMsg] = useState("");
 
-  // Load the signed-in user's data before showing the app.
+  // Load app config + the signed-in user's data before showing the app.
   useEffect(() => {
-    if (!user || !isAllowedEmail(user.email)) { setReady(false); return; }
+    if (!user) { setReady(false); setCfg(null); return; }
     let alive = true;
-    (async () => { await initUser(user.email, isAdminEmail(user.email)); if (alive) setReady(true); })();
+    (async () => {
+      const c = await loadAppConfig();
+      if (!alive) return;
+      setCfg(c);
+      if (resolveIsAllowed(user.email, c)) await initUser(user.email, lc(user.email) === OWNER_EMAIL);
+      if (alive) setReady(true);
+    })();
     return () => { alive = false; };
   }, [user]);
 
@@ -590,11 +694,11 @@ export default function App() {
   const signOut = () => {
     teardownUser(); cacheIdentity(null);
     try { if (window.google && window.google.accounts) window.google.accounts.id.disableAutoSelect(); } catch (e) {}
-    setUser(null); setReady(false);
+    setUser(null); setReady(false); setCfg(null);
   };
 
   if (!user) return <LoginScreen error={authMsg} />;
-  if (!isAllowedEmail(user.email)) return <NotInvited email={user.email} onSignOut={signOut} />;
-  if (!ready) return <Splash text={"Loading your lists…"} />;
-  return <PackingAppV2 user={user} isAdmin={isAdminEmail(user.email)} onSignOut={signOut} />;
+  if (!ready) return <Splash text={"Loading…"} />;
+  if (!resolveIsAllowed(user.email, cfg)) return <NotInvited email={user.email} onSignOut={signOut} />;
+  return <PackingAppV2 user={user} isAdmin={resolveIsAdmin(user.email, cfg)} cfg={cfg} onCfgChange={setCfg} onSignOut={signOut} />;
 }
