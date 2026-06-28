@@ -1,6 +1,6 @@
 # Packing Tool — multi-user design
 
-Status: **Phases 1–3 shipped** (2026-06-29). Phase 4 (optional hardening / magic-link) remains. Supersedes the single-shared-list model.
+Status: **Phases 1–4 shipped** (2026-06-29). Backend migrated to **Supabase** (Postgres + Auth + row-level security); the Make webhook is retained read-only for one-time data migration. Supersedes the single-shared-list model.
 
 ## Goal
 Evolve the personal single-list app into an **invite-only multi-user** app:
@@ -53,7 +53,7 @@ Today the scenario hardcodes key `shared`. Changes:
 1. ✅ **Accounts + per-user data**: Google login, per-user key, generalized Make scenario, migrate the `shared` data into the signed-in admin's record.
 2. ✅ **Multiple trips:** trips home, new-trip (dates→nights, type/details), per-trip inventory + state, trip switching, per-user default editor + save-as-default. State stored under the `v5` key; Phase-1 records auto-migrate to a first "My trip".
 3. ✅ **Admin:** admin panel with **Members** (invite/remove emails, toggle admin) and **Default list** (edit the global template) tabs, backed by the `app:defaults` record. Access (admins/allowed) is data-driven, with `jonas` as a hardcoded root-owner bootstrap that can't be locked out. New users seed their personal default from `app:defaults.template`. Only the owner (`OWNER_EMAIL`) inherits the legacy `shared` record.
-4. **Optional:** magic-link login, Google-token verification in Make (real isolation) or Supabase migration, data-store sharding if the 1 MB store fills.
+4. ✅ **Supabase migration:** real auth (Google + email **magic-link**) + Postgres with **row-level security** for true per-user isolation. Tables: `members` (roles/invites), `app_config` (global default template), `user_data` (per-user state blob) — see [`supabase/schema.sql`](supabase/schema.sql). Each user's first login auto-migrates their data from the old Make webhook. The admin panel manages the `members` table directly. *(Note: the Make-specific sections above are now superseded by Supabase.)*
 
 ## Config (all public, baked at build time)
 - `VITE_SYNC_URL` — Make webhook (default constant in code).

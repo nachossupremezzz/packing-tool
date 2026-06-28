@@ -1,114 +1,68 @@
 import { useState, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
 
-// ---- Config (all public values, baked at build; see DESIGN.md) ----
-const SYNC_URL = import.meta.env.VITE_SYNC_URL || "https://hook.eu1.make.com/9sj1gxhjebty57hamg2a9elteipdqbvb";
-const APP_SECRET = import.meta.env.VITE_APP_SECRET || "pktool_s3cr3t_2f8a"; // webhook speed-bump (public, not real security)
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "530393865659-hol5hh4c4vmft191fmjctkuk4fd4685b.apps.googleusercontent.com"; // public OAuth client id
-const ADMIN_EMAILS = ["jonas.takolander@gmail.com"]; // root owner(s): always admin + allowed (bootstrap, can't be locked out)
-const ALLOWED_EMAILS = ["jonas.takolander@gmail.com"]; // base invite list; admins add more via the panel (stored in app:defaults)
-const OWNER_EMAIL = "jonas.takolander@gmail.com"; // original single-list user; only they inherit the legacy "shared" record
+// ---- Config (public values, baked at build; see DESIGN.md) ----
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://gatojcysyitptaglomin.supabase.co";
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_MuvQXKsvsuwoFkLOlE_91Q_-6rKY-pk";
+const OWNER_EMAIL = "jonas.takolander@gmail.com"; // root owner: always admin (also seeded in the DB)
 const lc = (x) => String(x || "").toLowerCase();
 
-// ---- Auth helpers (Google Identity Services) ----
-const AUTH_LS = "packing:auth"; // cached identity { email, name, picture }
-function decodeJwt(t) { try { const p = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"); return JSON.parse(decodeURIComponent(escape(atob(p)))); } catch (e) { return null; } }
-function loadGis() {
-  return new Promise((resolve, reject) => {
-    if (window.google && window.google.accounts) return resolve();
-    const s = document.createElement("script");
-    s.src = "https://accounts.google.com/gsi/client"; s.async = true; s.defer = true;
-    s.onload = () => resolve(); s.onerror = () => reject(new Error("GIS load failed"));
-    document.head.appendChild(s);
-  });
+// One-time, read-only migration source: the old Make webhook. Remove once everyone has migrated.
+const MAKE_URL = "https://hook.eu1.make.com/9sj1gxhjebty57hamg2a9elteipdqbvb";
+const MAKE_SECRET = "pktool_s3cr3t_2f8a";
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ---- Members / access (enforced by Postgres row-level security) ----
+async function memberInfo(email) {
+  const e = lc(email);
+  let row = null;
+  try { const { data } = await supabase.from("members").select("is_admin,is_allowed").eq("email", e).maybeSingle(); row = data; } catch { /* not signed in / offline */ }
+  const isAdmin = e === OWNER_EMAIL || !!(row && row.is_admin);
+  return { isAdmin, isAllowed: isAdmin || !!(row && row.is_allowed) };
 }
-function cachedIdentity() { try { const v = localStorage.getItem(AUTH_LS); return v ? JSON.parse(v) : null; } catch (e) { return null; } }
-function cacheIdentity(u) { try { if (u) localStorage.setItem(AUTH_LS, JSON.stringify(u)); else localStorage.removeItem(AUTH_LS); } catch (e) {} }
+async function fetchMembers() { try { const { data } = await supabase.from("members").select("email,is_admin,is_allowed").order("email"); return data || []; } catch (e) { return []; } }
+async function addMember(email) { return supabase.from("members").upsert({ email: lc(email), is_allowed: true }, { onConflict: "email" }); }
+async function removeMember(email) { return supabase.from("members").delete().eq("email", lc(email)); }
+async function setMemberAdmin(email, isAdmin) { return supabase.from("members").update({ is_admin: isAdmin }).eq("email", lc(email)); }
 
-// ---- Storage adapter: one record per user (user:<email>) on the Make webhook ----
-// A user's whole state is one JSON map; localStorage mirrors it per user for offline reads.
-// Pushes are gated on a successful remote load so a failed fetch never clobbers good data.
-const LEGACY_KEYS = ["packing:v4:tpl", "packing:v2:settings", "packing:v4:checked", "packing:v4:userdef"];
-let activeKey = null;      // e.g. "user:jane@x.com"
-let migrateShared = false; // admin's first login seeds from the legacy single-list record
-let cache = null, cacheReady = false, remoteOK = false, syncTimer = null;
+// ---- Global default template (seeds new members) ----
+async function fetchAppTemplate() { try { const { data } = await supabase.from("app_config").select("template").eq("id", "singleton").maybeSingle(); return data ? data.template : null; } catch (e) { return null; } }
+async function saveAppTemplate(template) { return supabase.from("app_config").upsert({ id: "singleton", template }, { onConflict: "id" }); }
 
-const mirrorKey = () => "packing:v4:all:" + (activeKey || "anon");
-function readMirror() {
-  try { const m = localStorage.getItem(mirrorKey()); if (m) return JSON.parse(m); } catch (e) {}
-  const legacy = {}; // one-time pickup of the old per-key layout (single-user era)
-  for (const k of LEGACY_KEYS) { try { const v = localStorage.getItem(k); if (v != null) legacy[k] = v; } catch (e) {} }
-  return legacy;
-}
-function writeMirror() { try { localStorage.setItem(mirrorKey(), JSON.stringify(cache || {})); } catch (e) {} }
-
-async function remoteGet(key) {
-  const res = await fetch(SYNC_URL + "?api=get&secret=" + encodeURIComponent(APP_SECRET) + "&key=" + encodeURIComponent(key));
-  if (!res.ok) throw new Error("http " + res.status);
-  const txt = await res.text();
-  let obj = null; try { obj = txt ? JSON.parse(txt) : {}; } catch (e) { obj = {}; } // "Accepted"/missing -> {}
-  return obj && typeof obj === "object" ? obj : {};
+// ---- Per-user state (one RLS-isolated row per user) ----
+async function fetchUserData(userId) { try { const { data } = await supabase.from("user_data").select("data").eq("user_id", userId).maybeSingle(); return data ? data.data : null; } catch (e) { return null; } }
+let saveTimer = null;
+function saveUserData(userId, email, dataObj) {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    supabase.from("user_data").upsert({ user_id: userId, email: lc(email), data: dataObj }, { onConflict: "user_id" }).then(() => {}, () => {});
+  }, 600);
 }
 
-function remoteSet(key, value) {
-  return fetch(SYNC_URL + "?api=set&secret=" + encodeURIComponent(APP_SECRET) + "&key=" + encodeURIComponent(key), {
-    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "value=" + encodeURIComponent(value),
-  });
-}
-
-// ---- App-wide config (admin-managed record): { template, admins, allowed } ----
-const CONFIG_KEY = "app:defaults";
-async function loadAppConfig() { try { const c = await remoteGet(CONFIG_KEY); if (c && typeof c === "object") return c; } catch (e) {} return {}; }
-async function saveAppConfig(cfg) { try { await remoteSet(CONFIG_KEY, JSON.stringify(cfg)); return true; } catch (e) { return false; } }
-function resolveIsAdmin(email, cfg) { const e = lc(email); return !!e && (ADMIN_EMAILS.includes(e) || ((cfg && cfg.admins) || []).map(lc).includes(e)); }
-function resolveIsAllowed(email, cfg) { const e = lc(email); return resolveIsAdmin(email, cfg) || ALLOWED_EMAILS.includes(e) || ((cfg && cfg.allowed) || []).map(lc).includes(e); }
-
-// Initialise the adapter for a signed-in user; resolves once the cache is ready.
-async function initUser(email, isAdmin) {
-  activeKey = "user:" + String(email).toLowerCase();
-  migrateShared = !!isAdmin;
-  cache = readMirror(); cacheReady = false; remoteOK = false;
-  if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
-  if (SYNC_URL) {
-    try {
-      let remote = await remoteGet(activeKey);
-      if (Object.keys(remote).length === 0 && migrateShared) {
-        try { const legacy = await remoteGet("shared"); if (Object.keys(legacy).length > 0) remote = legacy; } catch (e) {}
-      }
-      if (Object.keys(remote).length > 0) cache = remote; // else keep local seed / app defaults
-      remoteOK = true; writeMirror();
-    } catch (e) { /* offline: keep local mirror, read-only to remote */ }
-  }
-  cacheReady = true;
-  return cache;
-}
-function teardownUser() {
-  if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
-  if (remoteOK) pushNow(); // flush pending writes before leaving
-  activeKey = null; cache = null; cacheReady = false; remoteOK = false; migrateShared = false;
-}
-
-function pushNow() {
-  syncTimer = null;
-  if (!SYNC_URL || !remoteOK || !activeKey) return;
+// One-time migration: pull a user's state from the old Make webhook (v5 blob, or the older per-key layout).
+async function migrateFromMake(email, appTemplate) {
+  let map = {};
   try {
-    fetch(SYNC_URL + "?api=set&secret=" + encodeURIComponent(APP_SECRET) + "&key=" + encodeURIComponent(activeKey), {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" }, // CORS-simple: no preflight
-      body: "value=" + encodeURIComponent(JSON.stringify(cache || {})),
-      keepalive: true,
-    }).catch(() => {});
-  } catch (e) {}
+    const res = await fetch(MAKE_URL + "?api=get&secret=" + encodeURIComponent(MAKE_SECRET) + "&key=" + encodeURIComponent("user:" + lc(email)));
+    if (res.ok) { const txt = await res.text(); try { map = JSON.parse(txt) || {}; } catch (e) { map = {}; } }
+  } catch (e) { map = {}; }
+  if (map && map.v5) { try { const d = JSON.parse(map.v5); if (d && d.profileDefault) return d; } catch (e) {} }
+  const getJson = (k) => { try { return map[k] ? JSON.parse(map[k]) : null; } catch (e) { return null; } };
+  const tpl = getJson("packing:v4:tpl");
+  const settings = getJson("packing:v2:settings");
+  const checked = getJson("packing:v4:checked");
+  const userdef = getJson("packing:v4:userdef");
+  const profileDefault = userdef || tpl || (appTemplate ? JSON.parse(JSON.stringify(appTemplate)) : makeDefaults());
+  const trips = [];
+  if (tpl) {
+    trips.push({ id: uid("t"), name: "My trip", type: (settings && settings.trip) || "golf",
+      startDate: "", endDate: "", nights: (settings && settings.nights) || 3, rounds: (settings && settings.rounds) || 4,
+      beach: !!(settings && settings.beach), notes: "", inventory: tpl, checked: checked || {}, createdAt: 0 });
+  }
+  return { v: 5, profileDefault, trips };
 }
-function scheduleSync() {
-  if (!SYNC_URL || !remoteOK || !activeKey) return; // only push once remote is reachable
-  if (syncTimer) clearTimeout(syncTimer);
-  syncTimer = setTimeout(pushNow, 600);
-}
-
-const store = {
-  async get(k) { if (!cacheReady) return null; const v = cache ? cache[k] : null; return v == null ? null : { value: v }; },
-  set(k, v) { if (!activeKey) return; if (!cache) cache = {}; cache[k] = v; cacheReady = true; writeMirror(); scheduleSync(); },
-};
 
 const C = { paper:"#f4f3ee", ink:"#15211b", fairway:"#1f6f47", fairwayDk:"#155034", line:"#e2e1d8", muted:"#6c726a", card:"#ffffff", sand:"#c9a24b", danger:"#b23b3b" };
 const uid = (p) => p + Math.random().toString(36).slice(2, 8);
@@ -233,23 +187,6 @@ function tripProgress(trip) {
   const secs = (trip.inventory && trip.inventory.sections) || [];
   const ids = secs.flatMap((s) => s.items.filter((i) => itemVisible(i, trip.type, trip.beach, "pack")).map((i) => i.id));
   return { packed: ids.filter((id) => (trip.checked || {})[id]).length, total: ids.length };
-}
-
-// First-run migration of the single-list (Phase 1) layout into the multi-trip (v5) shape.
-async function migrateToV5(appTemplate) {
-  const getJson = async (k) => { try { const r = await store.get(k); return r && r.value ? JSON.parse(r.value) : null; } catch (e) { return null; } };
-  const tpl = await getJson("packing:v4:tpl");
-  const settings = await getJson("packing:v2:settings");
-  const checked = await getJson("packing:v4:checked");
-  const userdef = await getJson("packing:v4:userdef");
-  const profileDefault = userdef || tpl || (appTemplate ? JSON.parse(JSON.stringify(appTemplate)) : makeDefaults());
-  const trips = [];
-  if (tpl) {
-    trips.push({ id: uid("t"), name: "My trip", type: (settings && settings.trip) || "golf",
-      startDate: "", endDate: "", nights: (settings && settings.nights) || 3, rounds: (settings && settings.rounds) || 4,
-      beach: !!(settings && settings.beach), notes: "", inventory: tpl, checked: checked || {}, createdAt: 0 });
-  }
-  return { v: 5, profileDefault, trips };
 }
 
 // ---- Reusable section/item list (pack + edit), operating on one template ----
@@ -499,38 +436,34 @@ function DefaultEditor({ profile, setProfile, onBack }) {
   );
 }
 
-function AdminPanel({ cfg, onSave, onBack }) {
+function AdminPanel({ template: initialTemplate, onTemplateSaved, onBack }) {
   const [tab, setTab] = useState("members");
-  const [admins, setAdmins] = useState(() => ((cfg && cfg.admins) || []).slice());
-  const [allowed, setAllowed] = useState(() => ((cfg && cfg.allowed) || []).slice());
-  const [template, setTemplate] = useState(() => (cfg && cfg.template) ? JSON.parse(JSON.stringify(cfg.template)) : makeDefaults());
+  const [members, setMembers] = useState([]);
   const [newEmail, setNewEmail] = useState("");
+  const [template, setTemplate] = useState(() => initialTemplate ? JSON.parse(JSON.stringify(initialTemplate)) : makeDefaults());
   const [scope, setScope] = useState("golf");
   const [expanded, setExpanded] = useState(null);
   const [nights, setNights] = useState(3);
   const [rounds, setRounds] = useState(4);
   const [flash, setFlash] = useState("");
 
-  const addEmail = () => {
-    const e = lc(newEmail.trim());
-    if (!e || !e.includes("@")) return;
-    if (!allowed.map(lc).includes(e) && !ADMIN_EMAILS.includes(e)) setAllowed([...allowed, e]);
-    setNewEmail("");
-  };
-  const removeEmail = (e) => { setAllowed(allowed.filter((x) => lc(x) !== lc(e))); setAdmins(admins.filter((x) => lc(x) !== lc(e))); };
-  const toggleAdmin = (e) => { const le = lc(e); setAdmins(admins.map(lc).includes(le) ? admins.filter((x) => lc(x) !== le) : [...admins, e]); };
-  const save = async () => { await onSave({ template, admins, allowed }); setFlash("✓ Saved"); setTimeout(() => setFlash(""), 1600); };
+  useEffect(() => { (async () => setMembers(await fetchMembers()))(); }, []);
+  const refresh = async () => setMembers(await fetchMembers());
+  const add = async () => { const e = lc(newEmail.trim()); if (!e || !e.includes("@")) return; setNewEmail(""); await addMember(e); await refresh(); };
+  const remove = async (e) => { await removeMember(e); await refresh(); };
+  const toggleAdmin = async (e, cur) => { await setMemberAdmin(e, !cur); await refresh(); };
+  const saveTpl = async () => { await saveAppTemplate(template); if (onTemplateSaved) onTemplateSaved(template); setFlash("✓ Saved"); setTimeout(() => setFlash(""), 1600); };
 
   const rows = [
-    ...ADMIN_EMAILS.map((e) => ({ email: e, admin: true, root: true })),
-    ...allowed.filter((e) => !ADMIN_EMAILS.includes(lc(e))).map((e) => ({ email: e, admin: admins.map(lc).includes(lc(e)), root: false })),
+    { email: OWNER_EMAIL, is_admin: true, root: true },
+    ...members.filter((m) => lc(m.email) !== OWNER_EMAIL).map((m) => ({ email: m.email, is_admin: m.is_admin, root: false })),
   ];
 
   return (
     <Shell>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
         <button onClick={onBack} style={linkBtn(C.muted)}>{"← Trips"}</button>
-        <button onClick={save} style={{ height:36, padding:"0 16px", borderRadius:10, border:"none", background: flash?C.fairwayDk:C.fairway, color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>{flash || "Save"}</button>
+        {tab==="list" && <button onClick={saveTpl} style={{ height:36, padding:"0 16px", borderRadius:10, border:"none", background: flash?C.fairwayDk:C.fairway, color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>{flash || "Save list"}</button>}
       </div>
       <h1 style={{ fontSize:22, fontWeight:800, margin:"0 0 12px" }}>Admin</h1>
       <div style={{ display:"flex", gap:8, marginBottom:16 }}>
@@ -541,27 +474,27 @@ function AdminPanel({ cfg, onSave, onBack }) {
 
       {tab==="members" && (
         <div>
-          <p style={{ fontSize:13, color:C.muted, lineHeight:1.45, margin:"0 0 12px" }}>Invite people by their Google account email. Admins can edit this panel. <b>Save</b> to apply.</p>
+          <p style={{ fontSize:13, color:C.muted, lineHeight:1.45, margin:"0 0 12px" }}>Invite people by their sign-in email. Changes save immediately.</p>
           <div style={{ display:"flex", gap:8, marginBottom:14 }}>
-            <input value={newEmail} onChange={(e)=>setNewEmail(e.target.value)} onKeyDown={(e)=>{ if (e.key==="Enter") addEmail(); }} placeholder="name@gmail.com" style={{ ...textInput, flex:1 }} />
-            <button onClick={addEmail} style={{ height:42, padding:"0 16px", borderRadius:10, border:"none", background:C.fairway, color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>Add</button>
+            <input value={newEmail} onChange={(e)=>setNewEmail(e.target.value)} onKeyDown={(e)=>{ if (e.key==="Enter") add(); }} placeholder="name@email.com" style={{ ...textInput, flex:1 }} />
+            <button onClick={add} style={{ height:42, padding:"0 16px", borderRadius:10, border:"none", background:C.fairway, color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>Add</button>
           </div>
           <div style={{ background:C.card, border:"1px solid "+C.line, borderRadius:14, overflow:"hidden" }}>
             {rows.map((m, idx) => (
               <div key={m.email} style={{ display:"flex", alignItems:"center", gap:10, padding:"11px 14px", borderTop: idx===0?"none":"1px solid "+C.line }}>
                 <span style={{ flex:1, minWidth:0, fontSize:14, color:C.ink, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{m.email}{m.root && <span style={{ color:C.muted, fontSize:12 }}> · owner</span>}</span>
-                <button disabled={m.root} onClick={()=>toggleAdmin(m.email)} style={{ border:"1px solid "+(m.admin?C.fairway:C.line), background:m.admin?C.fairway:C.card, color:m.admin?"#fff":C.muted, borderRadius:8, padding:"4px 9px", fontSize:12, fontWeight:600, cursor:m.root?"default":"pointer", opacity:m.root?0.6:1 }}>admin</button>
-                {!m.root && <button onClick={()=>removeEmail(m.email)} title="Remove" style={{ border:"none", background:"transparent", color:C.danger, fontSize:16, cursor:"pointer", lineHeight:1 }}>{"✕"}</button>}
+                <button disabled={m.root} onClick={()=>toggleAdmin(m.email, m.is_admin)} style={{ border:"1px solid "+(m.is_admin?C.fairway:C.line), background:m.is_admin?C.fairway:C.card, color:m.is_admin?"#fff":C.muted, borderRadius:8, padding:"4px 9px", fontSize:12, fontWeight:600, cursor:m.root?"default":"pointer", opacity:m.root?0.6:1 }}>admin</button>
+                {!m.root && <button onClick={()=>remove(m.email)} title="Remove" style={{ border:"none", background:"transparent", color:C.danger, fontSize:16, cursor:"pointer", lineHeight:1 }}>{"✕"}</button>}
               </div>
             ))}
           </div>
-          <p style={{ fontSize:11.5, color:C.muted, marginTop:10, lineHeight:1.4 }}>Access is enforced in-app (trust-based — see DESIGN.md). The owner can't be removed.</p>
+          <p style={{ fontSize:11.5, color:C.muted, marginTop:10, lineHeight:1.4 }}>Enforced by the database (row-level security). The owner can't be removed.</p>
         </div>
       )}
 
       {tab==="list" && (
         <div>
-          <p style={{ fontSize:13, color:C.muted, lineHeight:1.45, margin:"0 0 12px" }}>The starting list for <b>new members</b>. Existing members keep their own. Switch view to edit each scope; <b>Save</b> to apply.</p>
+          <p style={{ fontSize:13, color:C.muted, lineHeight:1.45, margin:"0 0 12px" }}>The starting list for <b>new members</b>. Existing members keep their own. Switch view to edit each scope; <b>Save list</b> to apply.</p>
           <div style={{ display:"flex", gap:8, marginBottom:10 }}>
             {[["golf","Golf view"],["vacation","Vacation view"]].map(([k,l]) => (
               <button key={k} onClick={()=>{ setScope(k); setExpanded(null); }} style={{ flex:1, height:42, borderRadius:12, border:"1px solid "+(scope===k?C.fairway:C.line), background:scope===k?C.fairway:C.card, color:scope===k?"#fff":C.ink, fontSize:14, fontWeight:700, cursor:"pointer" }}>{l}</button>
@@ -578,22 +511,26 @@ function AdminPanel({ cfg, onSave, onBack }) {
   );
 }
 
-function PackingAppV2({ user, isAdmin, cfg, onCfgChange, onSignOut }) {
+function PackingAppV2({ user, isAdmin, template, onTemplateSaved, onSignOut }) {
   const [data, setData] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState({ name: "home" });
 
-  useEffect(() => { (async () => {
-    let d = null;
-    try { const r = await store.get("v5"); if (r && r.value) d = JSON.parse(r.value); } catch (e) {}
-    if (!d) d = await migrateToV5(cfg && cfg.template);
-    setData(d); setLoaded(true);
-  })();
-  // cfg is already loaded before this view mounts; load the user's data once.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      let d = await fetchUserData(user.id);
+      if (!d) d = await migrateFromMake(user.email, template); // first login: pull old data or seed from global default
+      if (!alive) return;
+      setData(d); setLoaded(true);
+      saveUserData(user.id, user.email, d); // persist the initial/migrated state (creates the row)
+    })();
+    return () => { alive = false; };
+  // load once on mount for this user
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => { if (loaded && data) store.set("v5", JSON.stringify(data)); }, [data, loaded]);
+  useEffect(() => { if (loaded && data) saveUserData(user.id, user.email, data); }, [data, loaded, user.id, user.email]);
 
   const updateTrip = (id, patch) => setData((d) => ({ ...d, trips: d.trips.map((t) => t.id===id ? { ...t, ...patch } : t) }));
   const setTripInventory = (id, u) => setData((d) => ({ ...d, trips: d.trips.map((t) => t.id===id ? { ...t, inventory: typeof u==="function" ? u(t.inventory) : u } : t) }));
@@ -602,10 +539,9 @@ function PackingAppV2({ user, isAdmin, cfg, onCfgChange, onSignOut }) {
   const deleteTrip = (id) => { if (typeof window !== "undefined" && !window.confirm("Delete this trip?")) return; setData((d) => ({ ...d, trips: d.trips.filter((t) => t.id!==id) })); setView({ name:"home" }); };
   const setProfile = (u) => setData((d) => ({ ...d, profileDefault: typeof u==="function" ? u(d.profileDefault) : u }));
   const saveAsDefault = (inv) => setData((d) => ({ ...d, profileDefault: JSON.parse(JSON.stringify(inv)) }));
-  const saveConfig = async (next) => { await saveAppConfig(next); if (onCfgChange) onCfgChange(next); };
 
   if (!loaded || !data) return <Splash text={"Loading your trips…"} />;
-  if (view.name === "admin") return <AdminPanel cfg={cfg} onSave={saveConfig} onBack={()=>setView({ name:"home" })} />;
+  if (view.name === "admin") return <AdminPanel template={template} onTemplateSaved={onTemplateSaved} onBack={()=>setView({ name:"home" })} />;
   if (view.name === "new") return <NewTripForm defaultProfile={data.profileDefault} onCreate={addTrip} onCancel={()=>setView({ name:"home" })} />;
   if (view.name === "default") return <DefaultEditor profile={data.profileDefault} setProfile={setProfile} onBack={()=>setView({ name:"home" })} />;
   if (view.name === "trip") {
@@ -616,15 +552,35 @@ function PackingAppV2({ user, isAdmin, cfg, onCfgChange, onSignOut }) {
   return <Home user={user} isAdmin={isAdmin} onSignOut={onSignOut} trips={data.trips} onOpen={(id)=>setView({ name:"trip", id })} onNew={()=>setView({ name:"new" })} onEditDefault={()=>setView({ name:"default" })} onDelete={deleteTrip} onAdmin={isAdmin ? ()=>setView({ name:"admin" }) : null} />;
 }
 
-function LoginScreen({ error }) {
+function LoginScreen() {
+  const [email, setEmail] = useState("");
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const redirectTo = (typeof window !== "undefined" ? window.location.origin : "") + import.meta.env.BASE_URL;
+
+  const google = async () => { setMsg(""); const { error } = await supabase.auth.signInWithOAuth({ provider:"google", options:{ redirectTo } }); if (error) setMsg(error.message); };
+  const magic = async () => { const e = email.trim(); if (!e) return; setBusy(true); setMsg(""); const { error } = await supabase.auth.signInWithOtp({ email:e, options:{ emailRedirectTo: redirectTo } }); setBusy(false); if (error) setMsg(error.message); else setSent(true); };
+
   return (
     <div style={{ minHeight:"100vh", background:C.paper, color:C.ink, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
       <div style={{ width:"100%", maxWidth:360, padding:"24px 20px", textAlign:"center" }}>
         <div style={{ fontSize:42, marginBottom:6 }}>{"🧳"}</div>
         <h1 style={{ fontSize:26, fontWeight:800, letterSpacing:-0.5, margin:"0 0 6px" }}>Packing</h1>
         <p style={{ fontSize:14, color:C.muted, lineHeight:1.5, margin:"0 0 22px" }}>Sign in to plan trips and sync your lists across every device.</p>
-        <div id="gbtn" style={{ display:"flex", justifyContent:"center", minHeight:44 }} />
-        {error && <p style={{ fontSize:12.5, color:C.danger, marginTop:16, lineHeight:1.4 }}>{error}</p>}
+        {sent ? (
+          <div style={{ fontSize:14, color:C.fairwayDk, background:"#eef5f0", borderRadius:10, padding:"14px 16px", lineHeight:1.5 }}>Check your email — we sent a sign-in link to <b>{email}</b>.</div>
+        ) : (
+          <>
+            <button onClick={google} style={{ width:"100%", height:46, borderRadius:10, border:"1px solid "+C.line, background:C.card, color:C.ink, fontWeight:700, fontSize:15, cursor:"pointer", marginBottom:16 }}>Continue with Google</button>
+            <div style={{ display:"flex", alignItems:"center", gap:10, color:C.muted, fontSize:12, marginBottom:16 }}>
+              <span style={{ flex:1, height:1, background:C.line }} /> or email link <span style={{ flex:1, height:1, background:C.line }} />
+            </div>
+            <input value={email} onChange={(e)=>setEmail(e.target.value)} onKeyDown={(e)=>{ if (e.key==="Enter") magic(); }} type="email" placeholder="you@email.com" style={{ ...textInput, marginBottom:10 }} />
+            <button onClick={magic} disabled={busy} style={{ width:"100%", height:46, borderRadius:10, border:"none", background:C.fairway, color:"#fff", fontWeight:700, fontSize:15, cursor:"pointer", opacity:busy?0.6:1 }}>{busy ? "Sending…" : "Send magic link"}</button>
+          </>
+        )}
+        {msg && <p style={{ fontSize:12.5, color:C.danger, marginTop:16, lineHeight:1.4 }}>{msg}</p>}
       </div>
     </div>
   );
@@ -648,57 +604,37 @@ function NotInvited({ email, onSignOut }) {
 }
 
 export default function App() {
-  const [user, setUser] = useState(cachedIdentity);
-  const [cfg, setCfg] = useState(null);
+  const [session, setSession] = useState(undefined); // undefined = still checking
+  const [access, setAccess] = useState(null);
+  const [template, setTemplate] = useState(null);
   const [ready, setReady] = useState(false);
-  const [authMsg, setAuthMsg] = useState("");
 
-  // Load app config + the signed-in user's data before showing the app.
   useEffect(() => {
-    if (!user) { setReady(false); setCfg(null); return; }
+    supabase.auth.getSession().then(({ data }) => setSession(data.session || null));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s || null));
+    return () => { try { sub.subscription.unsubscribe(); } catch (e) {} };
+  }, []);
+
+  useEffect(() => {
+    if (session === undefined) return;
+    if (!session) { setReady(false); setAccess(null); setTemplate(null); return; }
     let alive = true;
     (async () => {
-      const c = await loadAppConfig();
+      const info = await memberInfo(session.user.email);
       if (!alive) return;
-      setCfg(c);
-      if (resolveIsAllowed(user.email, c)) await initUser(user.email, lc(user.email) === OWNER_EMAIL);
+      setAccess(info);
+      if (info.isAllowed) { const tpl = await fetchAppTemplate(); if (alive) setTemplate(tpl); }
       if (alive) setReady(true);
     })();
     return () => { alive = false; };
-  }, [user]);
+  }, [session]);
 
-  // Wire up Google sign-in while logged out.
-  useEffect(() => {
-    if (user) return;
-    let cancelled = false;
-    (async () => {
-      if (!GOOGLE_CLIENT_ID) { setAuthMsg("Sign-in isn't configured yet — add a Google client ID (VITE_GOOGLE_CLIENT_ID)."); return; }
-      try {
-        await loadGis();
-        if (cancelled || !(window.google && window.google.accounts)) return;
-        window.google.accounts.id.initialize({
-          client_id: GOOGLE_CLIENT_ID,
-          callback: (resp) => {
-            const c = decodeJwt(resp.credential);
-            if (c && c.email) { const u = { email: c.email, name: c.name, picture: c.picture }; cacheIdentity(u); setUser(u); }
-          },
-        });
-        const el = document.getElementById("gbtn");
-        if (el) window.google.accounts.id.renderButton(el, { theme: "filled_blue", size: "large", text: "signin_with", shape: "pill" });
-        window.google.accounts.id.prompt();
-      } catch (e) { setAuthMsg("Couldn't load Google sign-in. Check your connection and try again."); }
-    })();
-    return () => { cancelled = true; };
-  }, [user]);
+  const signOut = async () => { try { await supabase.auth.signOut(); } catch (e) {} setReady(false); setAccess(null); setTemplate(null); };
 
-  const signOut = () => {
-    teardownUser(); cacheIdentity(null);
-    try { if (window.google && window.google.accounts) window.google.accounts.id.disableAutoSelect(); } catch (e) {}
-    setUser(null); setReady(false); setCfg(null);
-  };
-
-  if (!user) return <LoginScreen error={authMsg} />;
-  if (!ready) return <Splash text={"Loading…"} />;
-  if (!resolveIsAllowed(user.email, cfg)) return <NotInvited email={user.email} onSignOut={signOut} />;
-  return <PackingAppV2 user={user} isAdmin={resolveIsAdmin(user.email, cfg)} cfg={cfg} onCfgChange={setCfg} onSignOut={signOut} />;
+  if (session === undefined || (session && !ready)) return <Splash text={"Loading…"} />;
+  if (!session) return <LoginScreen />;
+  if (!access || !access.isAllowed) return <NotInvited email={session.user.email} onSignOut={signOut} />;
+  const m = session.user.user_metadata || {};
+  const user = { id: session.user.id, email: session.user.email, name: m.full_name || m.name || session.user.email, picture: m.avatar_url || m.picture };
+  return <PackingAppV2 user={user} isAdmin={access.isAdmin} template={template} onTemplateSaved={setTemplate} onSignOut={signOut} />;
 }
