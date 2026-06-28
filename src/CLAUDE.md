@@ -29,29 +29,26 @@ Default rules: everyday underwear/socks scale with nights; golf underwear/socks/
 - `vac` → vacation only
 - `beach` → vacation + beach toggle on (always visible in edit mode so it can be edited)
 
-## Storage (current → target)
-Current: a `store` adapter — uses `window.storage` if present, else `localStorage`. Keys: `packing:v4:tpl`, `packing:v2:settings`, `packing:v4:checked`, `packing:v4:userdef`.
+## Storage
+A `store` adapter syncs all state through one Make.com webhook backed by a data-store record (`shared`). The four logical keys (`packing:v4:tpl`, `packing:v2:settings`, `packing:v4:checked`, `packing:v4:userdef`) are held together in one JSON map; `localStorage` (`packing:v4:all`) mirrors it for offline reads and migrates the old per-key layout. Loads via GET on start; saves via debounced form POST. Pushes are gated on a successful remote load so a failed fetch never clobbers good data.
 
-**Target: replace local storage with a Make.com webhook backend so state syncs across devices.**
-
-## Make backend (partly provisioned)
-- Org `7878127` "My Organization" (Pro, region **eu1.make.com**)
-- Team `1837746` "My Team"
-- Data store `140245` "Packing tool" (1 MB) — already created
-- Needs a data structure with one text field `value` (Make write actions require in-app approval)
-- Build a scenario with a **custom webhook**:
-  - `GET` (or `?api=get`) → data store *get* record key `shared` → respond JSON
-  - `POST ?api=set` with `text/plain` body → *upsert* record key `shared` → respond `ok`
-  - Use GET + text/plain POST to dodge CORS preflight, or set `Access-Control-Allow-Origin: *` in the webhook response module.
-- App loads on start (GET) and saves on change (POST) to this webhook URL instead of localStorage. Keep a localStorage fallback for offline.
+## Make backend (provisioned)
+- Org `7878127` (Pro, region **eu1.make.com**), Team `1837746`.
+- Data store `140245` "Packing tool" (1 MB), data structure `472982` (one text field `value`), record key `shared`.
+- Custom webhook hook `3308885` → URL `https://hook.eu1.make.com/9sj1gxhjebty57hamg2a9elteipdqbvb`.
+- Scenario `6365416` "Packing tool sync" (active, schedule `immediately`): webhook → router →
+  - `?api=set` → datastore **AddRecord** (key `shared`, `overwrite`, fields nested under `data.value`) → respond `ok`
+  - else → datastore **GetRecord** (key `shared`, `returnWrapped:false`; output `value` at top level) → respond `{{value}}` as JSON
+  - Both responses send `Access-Control-Allow-Origin: *`; Make Gateway also adds it automatically (even on errors).
+- App POSTs `application/x-www-form-urlencoded` `value=<json>` (CORS-simple, no preflight) — chosen over the original text/plain because Make parses it into a clean `value` field. Writes via this MCP token did **not** need in-app approval.
 
 ## Build / deploy plan
-1. Replace `src/App.jsx` and `src/index.css` (Jonas has the files). Delete unused `src/App.css`.
-2. `git init`, commit.
-3. Create a GitHub repo, push.
-4. Enable **GitHub Pages**. Vite gotcha: for a project site set `base: '/REPO_NAME/'` in `vite.config.js` or assets 404. A `gh-pages` action or `npm run build` + deploy of `dist/` both work.
-5. Add the Make webhook URL to the app (constant or `.env`), swap the `store` adapter to call it.
-6. Deploy, verify sync across phone + laptop.
+1. ✅ `src/App.jsx`/`src/index.css` in place; unused `src/App.css` deleted.
+2. ✅ `git init`, commits on `main`.
+3. ⏳ Create GitHub repo `packing-tool` (public) + push — needs `gh auth login` (gh is installed).
+4. ⏳ Enable **GitHub Pages**. `base: '/packing-tool/'` set in `vite.config.js`. Deploy via `.github/workflows/deploy.yml` (Actions builds + uploads `dist/`); set Pages source = **GitHub Actions** in repo settings.
+5. ✅ Webhook wired into the `store` adapter (constant default, overridable via `VITE_SYNC_URL`).
+6. ⏳ Deploy, then verify sync across phone + laptop (backend already verified in-browser: load→GET, change→POST, reload re-hydrates from server).
 
 ## Conventions
 - Don't break the rule engine or scope tags.
