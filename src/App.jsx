@@ -1,9 +1,67 @@
 import { useState, useEffect } from "react";
 
-// storage adapter: Claude artifact host -> window.storage; local/standalone -> localStorage
+// Storage adapter: syncs all state through one Make.com webhook (data-store record "shared").
+// Every logical key is held in a single JSON map; localStorage mirrors it for offline reads.
+// Override the endpoint with VITE_SYNC_URL at build time if the webhook ever changes.
+const SYNC_URL = import.meta.env.VITE_SYNC_URL || "https://hook.eu1.make.com/9sj1gxhjebty57hamg2a9elteipdqbvb";
+const LS_MIRROR = "packing:v4:all";
+const LEGACY_KEYS = ["packing:v4:tpl", "packing:v2:settings", "packing:v4:checked", "packing:v4:userdef"];
+
+let cache = null;        // { [key]: valueString }
+let cacheReady = false;  // cache has been initialised (remote or local)
+let remoteOK = false;    // last remote load succeeded -> safe to push (never clobber on failure)
+let syncTimer = null;
+
+function readLocalMirror() {
+  try { const m = localStorage.getItem(LS_MIRROR); if (m) return JSON.parse(m); } catch (e) {}
+  const legacy = {}; // migrate from the pre-sync per-key layout if present
+  for (const k of LEGACY_KEYS) { try { const v = localStorage.getItem(k); if (v != null) legacy[k] = v; } catch (e) {} }
+  return legacy;
+}
+function writeLocalMirror() { try { localStorage.setItem(LS_MIRROR, JSON.stringify(cache || {})); } catch (e) {} }
+
+async function ensureLoaded() {
+  if (cacheReady) return cache;
+  cache = readLocalMirror(); // instant/offline seed
+  if (SYNC_URL) {
+    try {
+      const res = await fetch(SYNC_URL + "?api=get");
+      if (res.ok) {
+        const txt = await res.text();
+        let remote = null; try { remote = txt ? JSON.parse(txt) : {}; } catch (e) { remote = {}; } // "Accepted"/empty -> {}
+        if (remote && typeof remote === "object") {
+          if (Object.keys(remote).length > 0) cache = remote; // remote wins when it has data; else keep local for migration
+          remoteOK = true;
+          writeLocalMirror();
+        }
+      }
+    } catch (e) { /* offline: keep local mirror, stay read-only to remote */ }
+  }
+  cacheReady = true;
+  return cache;
+}
+
+function pushNow() {
+  syncTimer = null;
+  if (!SYNC_URL || !remoteOK) return;
+  try {
+    fetch(SYNC_URL + "?api=set", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" }, // CORS-simple: no preflight
+      body: "value=" + encodeURIComponent(JSON.stringify(cache || {})),
+      keepalive: true,
+    }).catch(() => {});
+  } catch (e) {}
+}
+function scheduleSync() {
+  if (!SYNC_URL || !remoteOK) return; // only push once we know remote is reachable
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(pushNow, 600);
+}
+
 const store = {
-  async get(k) { try { if (typeof window !== "undefined" && window.storage) return await window.storage.get(k); const v = localStorage.getItem(k); return v == null ? null : { value: v }; } catch (e) { return null; } },
-  set(k, v) { try { if (typeof window !== "undefined" && window.storage) { window.storage.set(k, v); return; } localStorage.setItem(k, v); } catch (e) {} },
+  async get(k) { const all = await ensureLoaded(); const v = all ? all[k] : null; return v == null ? null : { value: v }; },
+  set(k, v) { if (!cache) cache = {}; cache[k] = v; cacheReady = true; writeLocalMirror(); scheduleSync(); },
 };
 
 const C = { paper:"#f4f3ee", ink:"#15211b", fairway:"#1f6f47", fairwayDk:"#155034", line:"#e2e1d8", muted:"#6c726a", card:"#ffffff", sand:"#c9a24b", danger:"#b23b3b" };
