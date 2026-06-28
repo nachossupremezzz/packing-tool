@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 // ---- Config (all public values, baked at build; see DESIGN.md) ----
 const SYNC_URL = import.meta.env.VITE_SYNC_URL || "https://hook.eu1.make.com/9sj1gxhjebty57hamg2a9elteipdqbvb";
 const APP_SECRET = import.meta.env.VITE_APP_SECRET || "pktool_s3cr3t_2f8a"; // webhook speed-bump (public, not real security)
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ""; // OAuth client id; empty disables sign-in
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "530393865659-hol5hh4c4vmft191fmjctkuk4fd4685b.apps.googleusercontent.com"; // public OAuth client id
 const ADMIN_EMAILS = ["jonas.takolander@gmail.com"];
 const isAdminEmail = (e) => !!e && ADMIN_EMAILS.includes(String(e).toLowerCase());
 // Invite-only access. Add invitee emails here (Phase 3 will manage this in the admin panel).
