@@ -5,7 +5,10 @@ const SYNC_URL = import.meta.env.VITE_SYNC_URL || "https://hook.eu1.make.com/9sj
 const APP_SECRET = import.meta.env.VITE_APP_SECRET || "pktool_s3cr3t_2f8a"; // webhook speed-bump (public, not real security)
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ""; // OAuth client id; empty disables sign-in
 const ADMIN_EMAILS = ["jonas.takolander@gmail.com"];
-const isAdminEmail = (e) => !!e && ADMIN_EMAILS.includes(e.toLowerCase());
+const isAdminEmail = (e) => !!e && ADMIN_EMAILS.includes(String(e).toLowerCase());
+// Invite-only access. Add invitee emails here (Phase 3 will manage this in the admin panel).
+const ALLOWED_EMAILS = ["jonas.takolander@gmail.com"];
+const isAllowedEmail = (e) => !!e && ALLOWED_EMAILS.includes(String(e).toLowerCase());
 
 // ---- Auth helpers (Google Identity Services) ----
 const AUTH_LS = "packing:auth"; // cached identity { email, name, picture }
@@ -379,6 +382,19 @@ function Splash({ text }) {
   return <div style={{ minHeight:"100vh", background:C.paper, color:C.muted, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"ui-sans-serif, system-ui, sans-serif", fontSize:14 }}>{text}</div>;
 }
 
+function NotInvited({ email, onSignOut }) {
+  return (
+    <div style={{ minHeight:"100vh", background:C.paper, color:C.ink, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
+      <div style={{ width:"100%", maxWidth:360, padding:"24px 20px", textAlign:"center" }}>
+        <div style={{ fontSize:40, marginBottom:8 }}>{"🔒"}</div>
+        <h1 style={{ fontSize:22, fontWeight:800, margin:"0 0 6px" }}>You're not on the list</h1>
+        <p style={{ fontSize:14, color:C.muted, lineHeight:1.5, margin:"0 0 20px" }}><b>{email}</b> hasn't been invited yet. Ask the owner to add you, then sign in again.</p>
+        <button onClick={onSignOut} style={{ height:40, padding:"0 18px", borderRadius:10, border:"1px solid "+C.line, background:C.card, color:C.ink, fontWeight:600, fontSize:14, cursor:"pointer" }}>Use a different account</button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState(cachedIdentity);
   const [ready, setReady] = useState(false);
@@ -386,7 +402,7 @@ export default function App() {
 
   // Load the signed-in user's data before showing the app.
   useEffect(() => {
-    if (!user) { setReady(false); return; }
+    if (!user || !isAllowedEmail(user.email)) { setReady(false); return; }
     let alive = true;
     (async () => { await initUser(user.email, isAdminEmail(user.email)); if (alive) setReady(true); })();
     return () => { alive = false; };
@@ -423,6 +439,7 @@ export default function App() {
   };
 
   if (!user) return <LoginScreen error={authMsg} />;
+  if (!isAllowedEmail(user.email)) return <NotInvited email={user.email} onSignOut={signOut} />;
   if (!ready) return <Splash text={"Loading your lists…"} />;
   return <PackingApp user={user} isAdmin={isAdminEmail(user.email)} onSignOut={signOut} />;
 }
