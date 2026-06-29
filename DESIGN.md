@@ -9,13 +9,15 @@ Evolve the personal single-list app into an **invite-only multi-user** app:
 - Each user has an **evolving personal default** template (new trips seed from it).
 - An **admin** edits the **global app defaults** (base template + rule config) that seed new users.
 
-## Key decisions
-- **Backend: stay on Make.com** (data store `140245` + existing webhook), namespaced per user. No new service.
-- **Auth: Google Sign-In** (client-side, Google Identity Services). Magic link deferred to Phase 4 — it needs email infra Make handles poorly.
-- **Audience: invite-only, trusted group.** Security is trust-based (see below).
-- **Admin allowlist:** `jonas.takolander@gmail.com`.
+## Key decisions (final)
+- **Backend: Supabase** (Postgres + Auth + row-level security). Phases 1–3 ran on Make.com (trust-based); Phase 4 migrated to Supabase for real per-user isolation.
+- **Auth: Supabase** — Google OAuth + email magic-link.
+- **Audience: invite-only**, enforced by the database (RLS + `members` table), not just the UI.
+- **Owner/admin bootstrap:** `jonas.takolander@gmail.com` (`OWNER_EMAIL`).
 
-## Security posture — read this
+> ⏪ The sections from here down to the **Phases** list describe the **Phases 1–3 Make implementation**, kept for history. The current backend is **Supabase** — see the **Phase 4** entry below and [`supabase/schema.sql`](supabase/schema.sql).
+
+## Security posture (Phases 1–3, Make — historical; superseded by Supabase RLS in Phase 4)
 This is a **static frontend + public webhook**, and the repo is public, so **anything in the JS bundle is public**. Implications:
 - Google Sign-In gives a *verified identity* (email) we use to namespace data. Good for identity.
 - The webhook itself can't verify the caller. We add a shared secret as a **speed bump**, but it lives in the public bundle — it deters casual hits, it is **not** real security.
@@ -56,6 +58,8 @@ Today the scenario hardcodes key `shared`. Changes:
 4. ✅ **Supabase migration:** real auth (Google + email **magic-link**) + Postgres with **row-level security** for true per-user isolation. Tables: `members` (roles/invites), `app_config` (global default template), `user_data` (per-user state blob) — see [`supabase/schema.sql`](supabase/schema.sql). Each user's first login auto-migrates their data from the old Make webhook. The admin panel manages the `members` table directly. *(Note: the Make-specific sections above are now superseded by Supabase.)*
 
 ## Config (all public, baked at build time)
-- `VITE_SYNC_URL` — Make webhook (default constant in code).
-- `VITE_GOOGLE_CLIENT_ID` — Google OAuth client id.
-- `VITE_APP_SECRET` — webhook speed-bump secret.
+- `VITE_SUPABASE_URL` — Supabase project URL.
+- `VITE_SUPABASE_ANON_KEY` — Supabase publishable (anon) key.
+- `OWNER_EMAIL` (constant in `src/App.jsx`) — hardcoded owner/admin bootstrap.
+
+*(Phases 1–3 also used `VITE_SYNC_URL` / `VITE_GOOGLE_CLIENT_ID` / `VITE_APP_SECRET` for the Make + Google-Identity-Services stack — no longer used.)*

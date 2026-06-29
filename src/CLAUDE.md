@@ -2,13 +2,13 @@
 
 Personal travel packing checklist web app. Two trip types (**golf**, **vacation**) share **one** item list; each item is tagged where it shows, and quantities compute from trip length. Mobile-first.
 
-**Evolving into an invite-only multi-user app** (accounts, per-trip lists, admin) — full plan, data model, and security posture in [DESIGN.md](../DESIGN.md). Phase 1 (Google login + per-user data) in progress.
+**Now an invite-only multi-user app** (accounts, per-trip lists, admin) on a **Supabase** backend — full history + data model in [DESIGN.md](../DESIGN.md).
 
 ## Stack
 - Vite + React (plain JS, no TypeScript).
 - All UI is inline-styled — no CSS framework. Global reset lives in `src/index.css`.
-- One component, default export `App`, in `src/App.jsx`.
-- Keep it lean: no extra dependencies unless genuinely needed.
+- All components live in `src/App.jsx` (default export `App`, the auth gate). UI components (PackList, Home, TripView, AdminPanel, …) stayed stable across the backend migrations.
+- Lean by default; the one runtime dependency beyond React is `@supabase/supabase-js` (auth + DB).
 
 ## Data model
 ```
@@ -31,26 +31,22 @@ Default rules: everyday underwear/socks scale with nights; golf underwear/socks/
 - `vac` → vacation only
 - `beach` → vacation + beach toggle on (always visible in edit mode so it can be edited)
 
-## Storage
-A `store` adapter syncs all state through one Make.com webhook backed by a data-store record (`shared`). The four logical keys (`packing:v4:tpl`, `packing:v2:settings`, `packing:v4:checked`, `packing:v4:userdef`) are held together in one JSON map; `localStorage` (`packing:v4:all`) mirrors it for offline reads and migrates the old per-key layout. Loads via GET on start; saves via debounced form POST. Pushes are gated on a successful remote load so a failed fetch never clobbers good data.
+## Backend (Supabase)
+Project `gatojcysyitptaglomin`: Postgres + Auth + row-level security. Frontend uses `@supabase/supabase-js` with the public URL + publishable key (baked in; overridable via `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`).
+- **Auth:** Supabase session — Google OAuth + email magic-link. `App` (auth gate) loads the session, resolves access from `members`, fetches the global template, then renders.
+- **Per-user state:** one `user_data` row (`{ user_id, email, data }`) holding the whole app-state blob `{ profileDefault, trips:[…] }`. `fetchUserData` loads it; `saveUserData` debounce-upserts. **RLS isolates each user to their own row** (real isolation — not trust-based).
+- **Global default:** `app_config.template` (admin-editable) seeds new users' `profileDefault`.
+- **Access/roles:** `members` table (`email, is_admin, is_allowed`); `OWNER_EMAIL` is a hardcoded admin bootstrap. RLS: any authed user reads `members`; only admins write `members` / `app_config`.
 
-## Make backend (provisioned)
-- Org `7878127` (Pro, region **eu1.make.com**), Team `1837746`.
-- Data store `140245` "Packing tool" (1 MB), data structure `472982` (one text field `value`), record key `shared`.
-- Custom webhook hook `3308885` → URL `https://hook.eu1.make.com/9sj1gxhjebty57hamg2a9elteipdqbvb`.
-- Scenario `6365416` "Packing tool sync" (active, schedule `immediately`): webhook → router →
-  - `?api=set` → datastore **AddRecord** (key `shared`, `overwrite`, fields nested under `data.value`) → respond `ok`
-  - else → datastore **GetRecord** (key `shared`, `returnWrapped:false`; output `value` at top level) → respond `{{value}}` as JSON
-  - Both responses send `Access-Control-Allow-Origin: *`; Make Gateway also adds it automatically (even on errors).
-- App POSTs `application/x-www-form-urlencoded` `value=<json>` (CORS-simple, no preflight) — chosen over the original text/plain because Make parses it into a clean `value` field. Writes via this MCP token did **not** need in-app approval.
+## Database (`../supabase/schema.sql`)
+Tables `members`, `app_config` (singleton), `user_data`; SECURITY DEFINER fns `is_member()` / `is_admin()` back the RLS policies. Run it in the Supabase SQL editor.
 
-## Build / deploy plan
-1. ✅ `src/App.jsx`/`src/index.css` in place; unused `src/App.css` deleted.
-2. ✅ `git init`, commits on `main`.
-3. ⏳ Create GitHub repo `packing-tool` (public) + push — needs `gh auth login` (gh is installed).
-4. ⏳ Enable **GitHub Pages**. `base: '/packing-tool/'` set in `vite.config.js`. Deploy via `.github/workflows/deploy.yml` (Actions builds + uploads `dist/`); set Pages source = **GitHub Actions** in repo settings.
-5. ✅ Webhook wired into the `store` adapter (constant default, overridable via `VITE_SYNC_URL`).
-6. ⏳ Deploy, then verify sync across phone + laptop (backend already verified in-browser: load→GET, change→POST, reload re-hydrates from server).
+**Legacy Make backend — decommissioned.** The Make.com webhook/scenario/data-store (scenario `6365416`, data store `140245`) was the Phase 1–3 backend; the scenario is **deactivated**. The data store is kept as a cold backup of pre-Supabase data and can be deleted when no longer wanted.
+
+## Deploy
+- Repo `nachossupremezzz/packing-tool`; **GitHub Pages** serves `https://nachossupremezzz.github.io/packing-tool/`.
+- `base: '/packing-tool/'` in `vite.config.js`. Every push to `main` auto-builds + deploys via `.github/workflows/deploy.yml`.
+- Supabase **Auth → URL Configuration** must allow the Pages URL + `http://localhost:5179/packing-tool/` (OAuth/magic-link redirect targets).
 
 ## Conventions
 - Don't break the rule engine or scope tags.
@@ -58,4 +54,4 @@ A `store` adapter syncs all state through one Make.com webhook backed by a data-
 - Respond and comment in English.
 
 ## Run
-`npm run dev` → localhost:5173. Keep it running in a separate terminal while editing for live reload.
+`npm run dev` → localhost:5173 (or 5179 via `.claude/launch.json`). Live reload while editing.

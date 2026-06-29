@@ -7,10 +7,6 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_M
 const OWNER_EMAIL = "jonas.takolander@gmail.com"; // root owner: always admin (also seeded in the DB)
 const lc = (x) => String(x || "").toLowerCase();
 
-// One-time, read-only migration source: the old Make webhook. Remove once everyone has migrated.
-const MAKE_URL = "https://hook.eu1.make.com/9sj1gxhjebty57hamg2a9elteipdqbvb";
-const MAKE_SECRET = "pktool_s3cr3t_2f8a";
-
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ---- Members / access (enforced by Postgres row-level security) ----
@@ -41,27 +37,9 @@ function saveUserData(userId, email, dataObj) {
   }, 600);
 }
 
-// One-time migration: pull a user's state from the old Make webhook (v5 blob, or the older per-key layout).
-async function migrateFromMake(email, appTemplate) {
-  let map = {};
-  try {
-    const res = await fetch(MAKE_URL + "?api=get&secret=" + encodeURIComponent(MAKE_SECRET) + "&key=" + encodeURIComponent("user:" + lc(email)));
-    if (res.ok) { const txt = await res.text(); try { map = JSON.parse(txt) || {}; } catch (e) { map = {}; } }
-  } catch (e) { map = {}; }
-  if (map && map.v5) { try { const d = JSON.parse(map.v5); if (d && d.profileDefault) return d; } catch (e) {} }
-  const getJson = (k) => { try { return map[k] ? JSON.parse(map[k]) : null; } catch (e) { return null; } };
-  const tpl = getJson("packing:v4:tpl");
-  const settings = getJson("packing:v2:settings");
-  const checked = getJson("packing:v4:checked");
-  const userdef = getJson("packing:v4:userdef");
-  const profileDefault = userdef || tpl || (appTemplate ? JSON.parse(JSON.stringify(appTemplate)) : makeDefaults());
-  const trips = [];
-  if (tpl) {
-    trips.push({ id: uid("t"), name: "My trip", type: (settings && settings.trip) || "golf",
-      startDate: "", endDate: "", nights: (settings && settings.nights) || 3, rounds: (settings && settings.rounds) || 4,
-      beach: !!(settings && settings.beach), notes: "", inventory: tpl, checked: checked || {}, createdAt: 0 });
-  }
-  return { v: 5, profileDefault, trips };
+// New user (no saved state yet): start from the global default template, no trips.
+function seedForNewUser(appTemplate) {
+  return { v: 5, profileDefault: appTemplate ? JSON.parse(JSON.stringify(appTemplate)) : makeDefaults(), trips: [] };
 }
 
 const C = { paper:"#f4f3ee", ink:"#15211b", fairway:"#1f6f47", fairwayDk:"#155034", line:"#e2e1d8", muted:"#6c726a", card:"#ffffff", sand:"#c9a24b", danger:"#b23b3b" };
@@ -520,7 +498,7 @@ function PackingAppV2({ user, isAdmin, template, onTemplateSaved, onSignOut }) {
     let alive = true;
     (async () => {
       let d = await fetchUserData(user.id);
-      if (!d) d = await migrateFromMake(user.email, template); // first login: pull old data or seed from global default
+      if (!d) d = seedForNewUser(template); // first login: start from the global default
       if (!alive) return;
       setData(d); setLoaded(true);
       saveUserData(user.id, user.email, d); // persist the initial/migrated state (creates the row)
