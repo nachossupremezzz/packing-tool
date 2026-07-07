@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 // ---- Config (public values, baked at build; see DESIGN.md) ----
@@ -183,6 +183,47 @@ function PackList({ tpl, setTpl, mode, trip, nights, rounds, beach, checked, set
 
   const sectionsView = tpl.sections.map((s) => ({ ...s, vis: s.items.filter((i) => itemVisible(i, trip, beach, mode)) })).filter((s) => s.vis.length > 0);
 
+  // Drag-to-reorder (edit mode). Reorders among *visible* items; hidden-scope items keep their positions.
+  const [dragId, setDragId] = useState(null);
+  const rowRefs = useRef({});
+  const drag = useRef(null); // { sid, iid, y, timer }
+  const viewRef = useRef([]);
+  viewRef.current = sectionsView;
+  const moveItem = (sid, iid, refIid, after) => mutate((t) => {
+    const s = findSec(t, sid);
+    const from = s.items.findIndex((i) => i.id === iid);
+    const [it] = s.items.splice(from, 1);
+    const to = s.items.findIndex((i) => i.id === refIid) + (after ? 1 : 0);
+    s.items.splice(to, 0, it);
+  });
+  const dragCheck = () => {
+    const d = drag.current; if (!d) return;
+    if (d.y < 80) window.scrollBy(0, -12); else if (d.y > window.innerHeight - 80) window.scrollBy(0, 12);
+    const sec = viewRef.current.find((s) => s.id === d.sid); if (!sec) return;
+    const order = sec.vis.map((i) => i.id);
+    const cur = order.indexOf(d.iid); if (cur < 0) return;
+    let target = cur;
+    for (let j = 0; j < order.length; j++) {
+      if (j === cur) continue;
+      const el = rowRefs.current[order[j]]; if (!el) continue;
+      const r = el.getBoundingClientRect(); const mid = r.top + r.height / 2;
+      if (j < cur && d.y < mid) target = Math.min(target, j);
+      if (j > cur && d.y > mid) target = Math.max(target, j);
+    }
+    if (target !== cur) moveItem(d.sid, d.iid, order[target], target > cur);
+  };
+  const startDrag = (e, sid, iid) => {
+    e.preventDefault();
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* synthetic events */ }
+    setExpanded(null);
+    if (drag.current) clearInterval(drag.current.timer);
+    drag.current = { sid, iid, y: e.clientY, timer: setInterval(dragCheck, 40) };
+    setDragId(iid);
+  };
+  const moveDrag = (e) => { if (drag.current) { drag.current.y = e.clientY; dragCheck(); } };
+  const endDrag = () => { if (drag.current) { clearInterval(drag.current.timer); drag.current = null; } setDragId(null); };
+  useEffect(() => () => { if (drag.current) clearInterval(drag.current.timer); }, []);
+
   return (
     <>
       {sectionsView.map((sec) => (
@@ -212,12 +253,16 @@ function PackList({ tpl, setTpl, mode, trip, nights, rounds, beach, checked, set
                 );
               }
               return (
-                <div key={it.id} style={{ borderTop: idx===0?"none":"1px solid "+C.line }}>
-                  <button onClick={() => setExpanded(isOpen ? null : it.id)} style={{ ...rowBtn(0), borderTop:"none" }}>
+                <div key={it.id} ref={(el) => { rowRefs.current[it.id] = el; }} style={{ borderTop: idx===0?"none":"1px solid "+C.line, background: dragId===it.id ? "#eef5f0" : "transparent" }}>
+                  <div style={{ display:"flex", alignItems:"stretch" }}>
+                    <span onPointerDown={(e) => startDrag(e, sec.id, it.id)} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} title="Drag to reorder"
+                      style={{ touchAction:"none", cursor: dragId===it.id?"grabbing":"grab", userSelect:"none", WebkitUserSelect:"none", display:"flex", alignItems:"center", padding:"0 4px 0 14px", color:C.muted, fontSize:14 }}>{"⠿"}</span>
+                    <button onClick={() => setExpanded(isOpen ? null : it.id)} style={{ ...rowBtn(0), borderTop:"none", paddingLeft:8 }}>
                     <span style={{ flex:1, fontSize:15.5 }}>{labelFor(it, nights, R)}</span>
                     <span style={{ fontSize:11, color:C.muted, border:"1px solid "+C.line, borderRadius:6, padding:"2px 6px", marginRight:8 }}>{it.scope==="all"?"Both":it.scope==="vac"?"Vacation":it.scope==="beach"?"Beach":"Golf"}</span>
                     <span style={{ color:C.muted, fontSize:13 }}>{isOpen?"▲":"▾"}</span>
-                  </button>
+                    </button>
+                  </div>
                   {isOpen && <ItemEditor sid={sec.id} item={it} nights={nights} R={R} trip={trip} updItem={updItem} updQty={updQty} delItem={delItem} close={() => setExpanded(null)} />}
                 </div>
               );
